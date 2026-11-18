@@ -38,6 +38,7 @@ jobs:
               A=$N/OpenMittelland.app; mkdir -p $A/Contents/MacOS
               lipo -create -output $A/Contents/MacOS/openmittelland target/{aarch64,x86_64}-apple-darwin/release/mad-app
               sed "s/@VERSION@/$V/g" tools/release/Info.plist > $A/Contents/Info.plist
+              mkdir -p $A/Contents/Resources && cp crates/mad-app/icon/icon.icns $A/Contents/Resources/
               codesign --force --deep -s - $A
               cp README.md LICENSE $N/
               ditto -c -k --norsrc --keepParent $N dist/$N-macos.zip ;;

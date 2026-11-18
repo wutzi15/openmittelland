@@ -5,6 +5,7 @@
 	<key>CFBundleName</key><string>OpenMittelland</string>
 	<key>CFBundleDisplayName</key><string>OpenMittelland</string>
 	<key>CFBundleIdentifier</key><string>io.github.openmittelland</string>
+	<key>CFBundleIconFile</key><string>icon</string>
 	<key>CFBundleExecutable</key><string>openmittelland</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>@VERSION@</string>

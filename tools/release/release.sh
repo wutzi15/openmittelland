@@ -37,6 +37,7 @@ macos() {
   local A=$D/$N/OpenMittelland.app; mkdir -p $A/Contents/MacOS
   lipo -create -output $A/Contents/MacOS/openmittelland $B/target/{aarch64,x86_64}-apple-darwin/release/mad-app
   sed "s/@VERSION@/$V/g" "$R/tools/release/Info.plist" > $A/Contents/Info.plist
+  mkdir -p $A/Contents/Resources && cp "$R/crates/mad-app/icon/icon.icns" $A/Contents/Resources/
   codesign --force --deep -s - $A
   cp ${DOCS[@]} $D/$N/
   (cd $D && ditto -c -k --norsrc --keepParent $N $N-macos.zip)

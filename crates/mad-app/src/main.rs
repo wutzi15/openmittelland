@@ -171,7 +171,10 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("Mittelland AD").with_inner_size(winit::dpi::LogicalSize::new(1280, 960));
+        let attrs = Window::default_attributes()
+            .with_title("Mittelland AD")
+            .with_inner_size(winit::dpi::LogicalSize::new(1280, 960))
+            .with_window_icon(window_icon());
         let w = Rc::new(el.create_window(attrs).expect("create window"));
         w.set_cursor_visible(false); // the game draws its own pointer
         let ctx = softbuffer::Context::new(w.clone()).expect("softbuffer context");
@@ -241,6 +244,14 @@ impl ApplicationHandler for App {
         }
         el.set_control_flow(ControlFlow::WaitUntil(now + tick - self.acc));
     }
+}
+
+/// Taskbar and title-bar icon (Windows, X11); macOS shows the bundle's `icon.icns`.
+fn window_icon() -> Option<winit::window::Icon> {
+    let mut r = png::Decoder::new(std::io::Cursor::new(include_bytes!("../icon/icon-64.png"))).read_info().ok()?;
+    let mut buf = vec![0; r.output_buffer_size()?];
+    let info = r.next_frame(&mut buf).ok()?;
+    winit::window::Icon::from_rgba(buf[..info.buffer_size()].to_vec(), info.width, info.height).ok()
 }
 
 fn main() {
