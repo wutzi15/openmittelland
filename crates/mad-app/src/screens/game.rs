@@ -941,8 +941,15 @@ impl Popup {
             Popup::Choice { rect, src, items, gems, .. } => {
                 let refs: Vec<&[u8]> = items.iter().map(Vec::as_slice).collect();
                 let w = Window::new(assets, *rect, src, &refs, &[], lit).with_text_dy(if *gems { GEM_DY } else { 0 });
-                // a menu printed into the turn-end report window keeps its scroll frame (rules-63 §2)
-                if *rect == REPORT_BOX { w.with_scroll() } else { w }
+                // a menu printed into the turn-end report window keeps its scroll frame and is scrolled up by whole
+                // lines until its last line shows (rules-63 §2.3; playtest: the last choice sat under the roll)
+                if *rect == REPORT_BOX {
+                    let shown = 12 + 24 * ((rect[3] - 12) / 24);
+                    let over = (w.laid.height - shown).max(0);
+                    w.with_scroll().with_text_dy(GEM_DY - (over + 23) / 24 * 24)
+                } else {
+                    w
+                }
             }
             _ => return None,
         })
@@ -2610,8 +2617,7 @@ impl Game {
         self.popups.pop_front();
         if let Some(Popup::Choice { menu: Some(Menu::Naming(next)), .. }) = self.popups.front() {
             let next = *next;
-            self.popups.pop_front();
-            self.open(assets, Menu::Naming(next));
+            self.reopen(assets, Menu::Naming(next));
         }
     }
 
@@ -4352,8 +4358,7 @@ impl Game {
         }
         if let Some(Popup::Choice { menu: Some(m), .. }) = self.popups.front() {
             let m = *m;
-            self.popups.pop_front();
-            self.open(ctx.assets, m);
+            self.reopen(ctx.assets, m);
         }
         Next::Stay
     }
@@ -4996,8 +5001,7 @@ impl Screen for Game {
                     }
                     _ => continue,
                 }
-                self.popups.pop_front();
-                self.open(ctx.assets, Menu::Save);
+                self.reopen(ctx.assets, Menu::Save);
                 continue;
             }
             if let Some(Popup::Choice { menu: Some(Menu::Naming(slot)), .. }) = self.popups.front() {
@@ -5026,8 +5030,7 @@ impl Screen for Game {
                     }
                     _ => continue,
                 }
-                self.popups.pop_front();
-                self.open(ctx.assets, Menu::Naming(slot));
+                self.reopen(ctx.assets, Menu::Naming(slot));
                 continue;
             }
             // the castle order strip is part of the castle screen, not a modal window: clicks outside it,
@@ -5086,8 +5089,7 @@ impl Screen for Game {
                 };
                 if let Some(&Popup::Map(plot)) = self.popups.front() {
                     if let Some(l) = self.map_hit(ctx.assets, pos).filter(|&l| l <= 13) {
-                        self.popups.pop_front();
-                        self.open(ctx.assets, Menu::Tree(plot, l, false));
+                        self.reopen(ctx.assets, Menu::Tree(plot, l, false));
                     }
                     continue;
                 }
@@ -5517,7 +5519,9 @@ impl Game {
                     let id = if selected || chosen || hover.contains(&k) { 0x74 } else { 0x73 };
                     // the bullet is the item itself (`%a`), its top on the line's top (live A/B: Kerzen, Optionen);
                     // a spinner digit next to it is no bullet
-                    if it.w < 20 && !item.last().is_some_and(u8::is_ascii_digit) {
+                    // scrolled report-window menus: no gem above or below the window
+                    let inside = !matches!(p, Popup::Choice { rect, .. } if *rect == REPORT_BOX && (it.y < rect[1] || it.y + 16 > rect[1] + rect[3]));
+                    if it.w < 20 && !item.last().is_some_and(u8::is_ascii_digit) && inside {
                         frame.blit(&assets.icon(id)[0], it.x, it.y);
                     }
                 }
@@ -5953,6 +5957,11 @@ pub(crate) mod tests {
         assert!(gift < plot && shown[gift].contains(" ist "), "{shown:?}");
         let dialog = shown[plot].clone();
         g.popups.drain(..plot);
+        shot(&g, &assets, "subplot_question");
+        // a dialog longer than the window shows its last choice (rules-63 §2.3; playtest: it sat under the roll)
+        let w = g.popups[0].window(&assets, &[]).unwrap();
+        let last = w.item_rect(w.laid.items.len() - 1);
+        assert!(last.y + last.h <= REPORT_BOX[1] + REPORT_BOX[3], "last choice at {}", last.y);
         g.act(Action::Answer(1), &mut ctx);
         // the dialog stays on top, the refusal (0xAA202) under it; the gift is not repeated
         let after: Vec<String> = g.popups.iter().map(text).collect();
@@ -6121,15 +6130,19 @@ pub(crate) mod tests {
         assert_eq!(g.scene_song(), Some(0x16));
         assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Naming(7)), .. })));
         shot(&g, &assets, "child_naming");
+        // a year-end window waits behind the cradle; a typed letter keeps the cradle in front (playtest report)
+        g.popups.push_back(Popup::Report(vec!["Jahresende".into()]));
         let mut audio = crate::audio::Audio::new(false);
         let mut ctx = ctx_for(&assets, &mut audio);
+        g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'X')), Event::Key(Key::Backspace)], ..Default::default() }, 0);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Naming(7)), .. })), "the cradle went behind the waiting window");
         let input = Input { events: vec![Event::Key(Key::Char(b'H')), Event::Key(Key::Char(b'a')), Event::Key(Key::Char(b'n')), Event::Key(Key::Char(b's')), Event::Key(Key::Backspace), Event::Key(Key::Char(b'z')), Event::Key(Key::Enter)], ..Default::default() };
         g.update(&mut ctx, &input, 0);
         assert_eq!(g.st.name_str(7), "Hanz");
         // the cradle stays while the second cry plays
         assert!(g.cry_ms > 0 && !g.popups.is_empty());
         g.update(&mut ctx, &Input::default(), 5000);
-        assert!(g.popups.is_empty());
+        assert!(matches!(g.popups.front(), Some(Popup::Report(_))) && g.popups.len() == 1);
     }
 
     /// rules-42 §1, rules-43 §2: the Grafik screen's scrolling row is the text speed with the EXE's six labels.

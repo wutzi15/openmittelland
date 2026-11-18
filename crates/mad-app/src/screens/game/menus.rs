@@ -56,10 +56,14 @@ pub(crate) const GIFT_NAMES: [&[u32]; 3] = [
 ];
 
 impl Game {
-    /// Rebuild an open window in place (its old popup goes).
+    /// Rebuild an open window in place: the new one takes the old one's place in the queue, in front of the
+    /// windows waiting behind it (playtest: typing a baby's name sent the cradle behind the year-end windows).
     pub(super) fn reopen(&mut self, assets: &Assets, m: Menu) {
+        let at = self.popups.iter().position(|p| matches!(p, super::Popup::Choice { menu: Some(x), .. } if *x == m)).unwrap_or(0);
         self.popups.retain(|p| !matches!(p, super::Popup::Choice { menu: Some(x), .. } if *x == m));
+        let behind: Vec<super::Popup> = self.popups.drain(at.min(self.popups.len())..).collect();
         self.open(assets, m);
+        self.popups.extend(behind);
     }
 
     pub(super) fn open(&mut self, assets: &Assets, m: Menu) {
