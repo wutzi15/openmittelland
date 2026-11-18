@@ -6,6 +6,12 @@ Not affiliated with the original's authors or rights holders.
 
 Status: playable, far from finished. The simulation, the Kontor and its rooms, trade, auctions, battles, sub-plots, courtship, trials and the event scenes are built from the original's data, texts and pictures; sound effects, scene music and speech are partial, MIDI is not implemented. `docs/FIDELITY.md` lists what was compared against the original, `docs/IMPL-GAPS.md` every guess and missing piece.
 
+## Why
+
+*Mittelland AD* is a great game: a trading and career simulation where you build a merchant house, buy your way into offices, court, scheme, bribe, sue and go to war, with a whole small world that keeps living around you. It deserves to be played today.
+
+Today that means DOSBox, and DOSBox is a poor way to play it: the mouse is captured and drifts, the window is either tiny or blurry, sound needs setting up, saves sit inside an emulated drive, and the whole thing runs a 1990s DOS extender just to show a 640×480 picture. OpenMittelland runs the same game natively on Windows, macOS and Linux, from the files of your own copy, as a normal program you double-click.
+
 ## Playing
 
 Download the archive for your system from the [releases page](../../releases) and start it. On the first start it looks for the game in the usual places (next to the program, your home, Games and Downloads folders, Steam and GOG libraries) and asks for the folder if it finds nothing: pick the game's install folder or the `MITTELL` folder that holds `MITTELL.EXE`. The choice is remembered.
