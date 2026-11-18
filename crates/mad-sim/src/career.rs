@@ -580,32 +580,40 @@ impl State {
         };
         cands.dedup();
         if cands.is_empty() {
+            // rules-65 §1: the humans' rivals, then three draws from the eligible computers, one de-duplication over
+            // all (same person or name index; the last entry fills the hole), every survivor registered (counter 2).
+            // Only then does an eligible human hold the seat open for a year; the registrations stay and are his
+            // opponents next year.
             let pool: Vec<usize> =
                 self.computers().filter(|&x| self.eligibility(x, loc, seat) == 2 && !self.in_type44(x)).collect();
-            let mut drawn = vec![];
-            if !pool.is_empty() {
-                for _ in 0..3 {
-                    let x = pool[self.r(pool.len() as u32) as usize];
-                    if !drawn.contains(&x) {
-                        drawn.push(x);
-                    }
-                }
-            }
-            let humans: Vec<usize> = self.humans().collect();
-            if humans.iter().any(|&h| self.eligibility(h, loc, seat) == 2) {
-                return false;
-            }
+            let human_eligible = self.humans().any(|h| self.eligibility(h, loc, seat) == 2);
             for &(_, r) in snap {
                 if self.eligibility(r, loc, seat) == 2 && !self.in_type44(r) {
-                    drawn.push(r);
+                    cands.push(r);
                 }
             }
-            for x in drawn {
-                let nm = self.persons[x].name();
-                if !cands.iter().any(|&c| c == x || self.persons[c].name() == nm) {
-                    cands.push(x);
-                    self.new_application(x, loc, seat);
+            if !pool.is_empty() {
+                for _ in 0..3 {
+                    cands.push(pool[self.r(pool.len() as u32) as usize]);
                 }
+            }
+            let mut i = 0;
+            while i < cands.len() {
+                let mut j = i + 1;
+                while j < cands.len() {
+                    if cands[j] == cands[i] || self.persons[cands[j]].name() == self.persons[cands[i]].name() {
+                        cands.swap_remove(j);
+                    } else {
+                        j += 1;
+                    }
+                }
+                i += 1;
+            }
+            for &c in &cands {
+                self.new_application(c, loc, seat);
+            }
+            if human_eligible {
+                return false;
             }
         }
         if cands.is_empty() {
@@ -644,7 +652,7 @@ impl State {
                 } else {
                     let mut best = (i32::MIN, 0);
                     for (k, &c) in cands.iter().enumerate() {
-                        let s = self.vote_score(e, c, loc, o);
+                        let s = self.vote_score(e, c, loc, o, snap);
                         if s > best.0 {
                             best = (s, k);
                         }
@@ -685,7 +693,7 @@ impl State {
         true
     }
 
-    fn vote_score(&mut self, e: usize, c: usize, loc: usize, o: usize) -> i32 {
+    fn vote_score(&mut self, e: usize, c: usize, loc: usize, o: usize, snap: &[(usize, usize)]) -> i32 {
         let pc = &self.persons[c];
         let mut s = self.persons[e].favour(c) as i32 + pc.title() as i32;
         if pc.has_office() && is_church_office(global_office(pc)) == is_church_office(o) {
@@ -693,7 +701,8 @@ impl State {
                 let kind = pc.church();
                 let col: Vec<usize> = self
                     .computers()
-                    .filter(|&q| self.persons[q].has_office() && self.persons[q].loc() as usize == loc && self.persons[q].church() == kind)
+                    // place and kind only (rules-65 §4): at place 0 the officeless persons count for a secular seat
+                    .filter(|&q| self.persons[q].loc() as usize == loc && self.persons[q].church() == kind)
                     .collect();
                 let sum: i32 = col.iter().map(|&q| self.persons[q].favour(c) as i32).sum();
                 if sum > 0 {
@@ -701,7 +710,8 @@ impl State {
                 }
             }
             s += (33 - (o as i32 - global_office(&self.persons[c]) as i32).max(0)) >> 1;
-            if self.persons[c].human() {
+            // a human's year-start rival, not a human candidate (rules-65 §4)
+            if snap.iter().any(|&(_, r)| r == c) {
                 s += self.ri(20);
             }
         }
@@ -843,6 +853,33 @@ mod tests {
         b.year_end_offices(&mut Auto);
         assert!(a == b);
         assert!(a.holder(4, 6).is_some(), "Bürgermeister refilled");
+    }
+
+    /// rules-65 §1/§2: a seat a human could take stays open for a year, but the drawn computers are registered at
+    /// once and stand against him when he applies (playtest report: every application won without a vote).
+    #[test]
+    fn rules65_registered_computers_contest_the_human() {
+        let mut st = State::new_world(3);
+        let h = st.setup_human(&crate::world::HumanSetup::test(2)).unwrap();
+        st.persons[h].set_title(1);
+        st.year = 1601;
+        for p in 0..PERSONS {
+            if st.persons[p].used() && st.persons[p].loc() == 2 && st.persons[p].idx() <= 2 && st.persons[p].has_office() {
+                st.vacate_silently(p);
+            }
+        }
+        assert_eq!(st.eligibility(h, 2, 0), 2);
+        st.year_end_offices(&mut Auto);
+        assert!(st.holder(2, 0).is_none(), "held open for the human");
+        let registered: Vec<usize> = st.applicants(2, &(0..3)).into_iter().filter(|&c| !st.persons[c].human()).collect();
+        assert!(!registered.is_empty(), "computers registered at once");
+        st.apply_for(h, 2, 0, true);
+        let ev = st.year_end_offices(&mut Auto);
+        let el = ev.iter().find_map(|e| match e {
+            Event::Election { loc: 2, candidates, kind, .. } if candidates.contains(&(h as u8)) => Some((candidates.len(), *kind)),
+            _ => None,
+        });
+        assert!(matches!(el, Some((n, k)) if n >= 2 && k != 2), "a real vote, not 'mangels weiterer Bewerber': {el:?}");
     }
 
     /// rules-40 §1: two empty Ratsherr seats run two elections in the same year end.
