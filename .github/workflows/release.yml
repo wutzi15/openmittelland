@@ -1,0 +1,61 @@
+name: release
+# A pushed tag vX.Y.Z builds the three archives tools/release/release.sh makes locally and attaches them to the
+# GitHub release of that tag (created if missing). Runs only in the public repo (the private one has no CI minutes).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.repository == 'wutzi15/openmittelland'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, name: macos }
+          # Ubuntu 22.04's glibc 2.35: the binary runs on it and everything newer
+          - { os: ubuntu-22.04, name: linux-x86_64 }
+          - { os: windows-latest, name: windows-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Linux audio headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Package
+        shell: bash
+        run: |
+          V=${GITHUB_REF_NAME#v}; N=OpenMittelland-$V; mkdir -p $N dist
+          case $RUNNER_OS in
+            macOS)
+              for t in aarch64-apple-darwin x86_64-apple-darwin; do cargo build --release -p mad-app --target $t; done
+              A=$N/OpenMittelland.app; mkdir -p $A/Contents/MacOS
+              lipo -create -output $A/Contents/MacOS/openmittelland target/{aarch64,x86_64}-apple-darwin/release/mad-app
+              sed "s/@VERSION@/$V/g" tools/release/Info.plist > $A/Contents/Info.plist
+              codesign --force --deep -s - $A
+              cp README.md LICENSE $N/
+              ditto -c -k --norsrc --keepParent $N dist/$N-macos.zip ;;
+            Linux)
+              cargo build --release -p mad-app
+              cp target/release/mad-app $N/openmittelland; cp README.md LICENSE $N/
+              tar czf dist/$N-linux-x86_64.tar.gz $N ;;
+            Windows)
+              cargo build --release -p mad-app
+              cp target/release/mad-app.exe $N/OpenMittelland.exe; cp README.md $N/; cp LICENSE $N/LICENSE.txt
+              7z a -bd dist/$N-windows-x86_64.zip $N >/dev/null ;;
+          esac
+      - name: Upload to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "OpenMittelland ${GITHUB_REF_NAME#v}" --notes-file tools/release/NOTES.md \
+            || true
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber

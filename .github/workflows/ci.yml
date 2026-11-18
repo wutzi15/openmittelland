@@ -3,6 +3,8 @@ on: [push, pull_request]
 
 jobs:
   build:
+    # the private backup repo has no CI minutes; the public export runs it
+    if: github.repository == 'wutzi15/openmittelland'
     strategy:
       fail-fast: false
       matrix:

@@ -26,6 +26,15 @@ Rust 1.100 or newer. Linux needs `libasound2-dev` (ALSA).
 
 `tools/release/release.sh VERSION` builds the release archives (macOS here, Linux and Windows on build hosts over SSH). `ARCHITECTURE.md` describes the crates, `AGENTS.md` the clean-room rules the work follows.
 
+## Contributing
+
+Issues and pull requests are welcome, in English or German.
+
+- **Bugs**: say what you did, what the original game does there and what OpenMittelland does instead; a screenshot of both helps most. Saves (`GAME*.DAT` from the folder above) make a report reproducible.
+- **Pull requests**: keep `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` green, and run the tests with `MAD_DATA` pointing at your copy if you can (CI has no game files, so those tests skip there).
+- **Never include** files of the original game (pictures, sounds, texts, saves of its install) or code taken from it, also not in issues. The project rebuilds the game from its behaviour; `AGENTS.md` explains the rules.
+- Questions about how something works in the original belong in an issue too.
+
 ## License
 
 GPL-3.0-or-later, see `LICENSE`. The game data you supply stays under its own copyright.
