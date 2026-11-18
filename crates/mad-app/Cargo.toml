@@ -1,0 +1,15 @@
+[package]
+name = "mad-app"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+mad-assets = { path = "../mad-assets" }
+mad-sim = { path = "../mad-sim" }
+winit = "0.30"
+softbuffer = "0.4"
+rodio = { version = "0.23", default-features = false, features = ["playback", "vorbis", "wav"] }
+png = "0.18"
+rfd = "0.18"
