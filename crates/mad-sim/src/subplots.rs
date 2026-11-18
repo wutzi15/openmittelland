@@ -52,6 +52,8 @@ impl State {
 
     /// §5.1 starter k = 0..16 for human h.
     pub fn subplot_start(&mut self, h: usize, k: u32, ch: &mut dyn Choices, ev: &mut Vec<Event>) {
+        // the dialogs print into the turn-end window after the lines so far (rules-13)
+        ch.show(ev);
         let hb = h as u8;
         let t = 32 + k as u8 + (k >= 3) as u8; // 0..2 → 32..34, 3.. → 36..49 (35 unused)
         if t != 37 && self.heap.has(t, hb) {
@@ -437,6 +439,7 @@ impl State {
 
     /// Handler for sub-plot record `i` (types 32..49) after the turn-end countdown.
     pub fn subplot_tick(&mut self, i: usize, ch: &mut dyn Choices, ev: &mut Vec<Event>) {
+        ch.show(ev);
         let r = self.heap.recs[i].clone();
         let (t, h, c) = (r[0], r[1] as usize, r[3]);
         ev.push(Event::SubPlot { person: h as u8, kind: t, step: c });

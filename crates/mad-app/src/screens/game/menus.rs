@@ -896,8 +896,9 @@ impl Game {
                     self.popups.push_back(f.popup(assets, 120, 400, None).with_menu(m));
                     return;
                 }
-                if matches!(q, mad_sim::Ask::Gift { .. }) {
-                    // rules-63 §2: printed into the turn-end report window, no dialog of its own
+                if matches!(q, mad_sim::Ask::Gift { .. } | mad_sim::Ask::Plot { .. }) {
+                    // rules-63 §2, rules-13: printed into the turn-end report window, no dialog of their own
+                    self.report_menu = Some((f.src.clone(), f.items.clone()));
                     self.popups.push_back(f.popup_at(super::REPORT_BOX).with_menu(m));
                     return;
                 }

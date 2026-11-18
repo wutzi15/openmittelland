@@ -1068,6 +1068,8 @@ pub struct Game {
     /// lines of a menu answered inside the turn-end report window (the gifts, rules-63 §2): the window goes on
     /// with them on top
     carry_lines: Vec<String>,
+    /// the question open in the turn-end report window (markup, item labels), as last built
+    report_menu: Option<(Vec<u8>, Vec<Vec<u8>>)>,
     /// `report` runs for the turn-end lines shown before a question (`Choices::show`), the turn end goes on
     reporting_early: bool,
     /// (human, rival) drawn when the Bewerbung window opened (rules-64 §2)
@@ -1120,6 +1122,33 @@ const YEAR_BOX: [i32; 4] = [100, 126, 440, 300];
 /// Leads a report line that is markup kept from a menu answered in the window (the gifts, rules-63 §2), one char
 /// per byte; its `%m` items are the gem bullets.
 const RAW: char = '\u{1}';
+
+/// An answered menu's markup with its values filled in: number and word items become their text, bullets stay
+/// items (`%m`) so they keep their gems.
+fn answered(src: &[u8], items: &[Vec<u8>]) -> Vec<u8> {
+    let (mut out, mut k, mut i) = (vec![], 0, 0);
+    while i < src.len() {
+        match (src[i], src.get(i + 1)) {
+            (b'%', Some(b'%')) => {
+                out.extend_from_slice(b"%%");
+                i += 2;
+            }
+            (b'%', Some(b'm')) => {
+                match items.get(k) {
+                    Some(l) if l.as_slice() != b"   " => out.extend_from_slice(l),
+                    _ => out.extend_from_slice(b"%m"),
+                }
+                k += 1;
+                i += 2;
+            }
+            (b, _) => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    out
+}
 
 fn raw_line(src: &[u8]) -> String {
     std::iter::once(RAW).chain(src.iter().map(|&b| b as char)).collect()
@@ -1230,6 +1259,7 @@ impl Game {
             church: 0,
             pending_cash: None,
             carry_lines: vec![],
+            report_menu: None,
             reporting_early: false,
             apply_rivals: vec![],
             turn_cash: None,
@@ -4280,11 +4310,10 @@ impl Game {
                 if let Some(Pending { cmd, mut answers, ask }) = self.pending.take() {
                     answers.push(v);
                     self.church_after(ctx.assets, &ask, v);
-                    if let Ask::Gift { target, prices, names } = ask {
-                        // the menu stays in the report window, the reaction prints right under it (rules-63 §2)
-                        let mut f = Form::default();
-                        f.inline(&self.gift_text(ctx.assets, target, prices, names), vec![]);
-                        self.carry_lines = vec![raw_line(&f.src)];
+                    // a menu printed into the report window (gifts, sub-plots) stays there, the reaction prints right
+                    // under it (rules-63 §2, rules-13)
+                    if let Some((src, items)) = self.report_menu.take() {
+                        self.carry_lines.push(raw_line(&answered(&src, &items)));
                     }
                     self.run_cmd(ctx.assets, cmd, answers);
                     if let Ask::Match { target, .. } = ask {
@@ -5893,6 +5922,46 @@ pub(crate) mod tests {
         shot(&g, &assets, "courtship_gift_answered");
         let i = g.st.heap.find(30, h as u8, mad_sim::heap::ANY).expect("still courting");
         assert_eq!(mad_sim::heap::r32(&g.st.heap.recs[i], 4), 0, "refusing the gift is free");
+    }
+
+    /// A sub-plot question after the gift in one turn end (rules-13, rules-63 §2): the gift reaction is shown before
+    /// the plot dialog, the dialog sits in the report window, and its answer prints under the dialog (playtest report:
+    /// the answer landed under the gift menu).
+    #[test]
+    fn real_subplot_after_gift_keeps_order() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap();
+        let (c, fee, w) = g.st.matchmaker_offer(h).expect("a candidate");
+        g.st.start_courtship(h, c, fee, w);
+        // the inventor (type 32) asks at counter 3; allocated after the courtship, it comes later in the record pass
+        g.st.heap.alloc(32, h as u8, mad_sim::state::NONE, 4).unwrap();
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        g.act(Action::EndTurn, &mut ctx);
+        assert!(matches!(g.pending.as_ref().map(|p| &p.ask), Some(Ask::Gift { .. })));
+        let k = g.popups.iter().position(|p| matches!(p, Popup::Choice { menu: Some(Menu::Question), .. })).unwrap();
+        g.popups.drain(..k);
+        g.act(Action::Answer(0), &mut ctx);
+        assert!(matches!(g.pending.as_ref().map(|p| &p.ask), Some(Ask::Plot { kind: 32, .. })), "{:?}", g.pending.as_ref().map(|p| &p.ask));
+        // first the window with the gift menu and its reaction, then the plot dialog in the report window
+        let text = |p: &Popup| match p { Popup::Report(l) => l.iter().map(|x| plain(&report_src(std::slice::from_ref(x)))).collect::<Vec<_>>().join("|"), Popup::Choice { src, .. } => plain(src), _ => String::new() };
+        let shown: Vec<String> = g.popups.iter().map(text).collect();
+        let gift = shown.iter().position(|s| s.contains("schenken")).expect("gift window");
+        let plot = g.popups.iter().position(|p| matches!(p, Popup::Choice { rect, menu: Some(Menu::Question), .. } if *rect == REPORT_BOX)).expect("plot dialog in the report window");
+        assert!(gift < plot && shown[gift].contains(" ist "), "{shown:?}");
+        let dialog = shown[plot].clone();
+        g.popups.drain(..plot);
+        g.act(Action::Answer(1), &mut ctx);
+        // the dialog stays on top, the refusal (0xAA202) under it; the gift is not repeated
+        let after: Vec<String> = g.popups.iter().map(text).collect();
+        let refusal = plain(&assets.text(0xAA202));
+        let r = after.iter().find(|s| s.contains(&refusal[..20])).expect("refusal line");
+        assert!(r.starts_with(&dialog[..20]) && !r.contains("schenken"), "{r}");
+        let k = g.popups.iter().position(|p| text(p).contains(&refusal[..20])).unwrap();
+        g.popups.drain(..k);
+        shot(&g, &assets, "subplot_after_gift");
     }
 
     /// The year-end chronicle popup (option Geschichtsschreibung) quotes the year's EXE entry.
