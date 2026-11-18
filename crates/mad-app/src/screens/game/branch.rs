@@ -353,7 +353,11 @@ impl Game {
 
     /// Goods row geometry: (good, icon rect, stock-number rect), plus the warehouse icon.
     fn goods_row(&self, b: usize) -> (Vec<GoodSlot>, [i32; 4]) {
-        let goods = self.city_goods(b);
+        // formats §11.3: the city's own goods, then every other good the branch holds (a stolen order book's
+        // product, deliveries; playtest: leather in Lichterheide could not be sold)
+        let mut goods = self.city_goods(b);
+        let pr = &self.st.props[b];
+        goods.extend((0..GOODS as u8).filter(|&g| !goods.contains(&g) && pr.stock(g as usize) > 0).collect::<Vec<_>>());
         let pos = self.slots(goods.len() + 1);
         let row = goods.iter().zip(&pos[1..]).map(|(&g, &(cx, cy))| (g, [cx - 24, cy - 24, 48, 48], [cx - 24, cy + 22, 48, 24]));
         (row.collect(), [pos[0].0 - 24, pos[0].1 - 24, 48, 48])
@@ -482,6 +486,21 @@ mod tests {
         assert_eq!((o[0], o[6] != 3), (2, true), "sell order with another city as destination");
         g.edit_order(&assets, b, 1, OrderField::Qty, 100);
         assert_eq!((u16::from_le_bytes([g.st.props[b].order(1)[1], g.st.props[b].order(1)[2]]), g.st.props[b].order(1)[4]), (100, 1));
+    }
+
+    /// formats §11.3: a good the city does not produce shows after the city's goods once the branch holds some, so it
+    /// can be sold (playtest: a stolen order book's leather had no icon).
+    #[test]
+    fn real_goods_row_shows_foreign_stock() {
+        let Some(assets) = super::super::tests::test_assets() else { return };
+        let mut g = Game::start(&assets, mad_sim::State::new_game(3, 3, &[mad_sim::world::HumanSetup::test(3)]).unwrap());
+        let b = g.st.branch_at(g.me().unwrap(), 3).unwrap();
+        let own = g.city_goods(b);
+        let foreign = (0..GOODS as u8).find(|x| !own.contains(x)).unwrap();
+        assert!(!g.goods_row(b).0.iter().any(|s| s.0 == foreign));
+        g.st.props[b].set_stock(foreign as usize, 1039);
+        let row = g.goods_row(b).0;
+        assert_eq!(row.iter().map(|s| s.0).collect::<Vec<_>>(), [own, vec![foreign]].concat());
     }
 
     /// With `MAD_SHOT_DIR`, writes our Kronsbach branch screen (diff against a capture with refdiff).

@@ -30,6 +30,13 @@ fn main() {
                 println!("  canon of city {c}: {d:3} religion {} favour→me {:3}", st.persons[d].religion(), st.persons[d].favour(h));
             }
         }
+        println!("  certificate {}", p.certificate());
+        for b in st.props_of(h, mad_sim::state::KIND_BRANCH).collect::<Vec<_>>() {
+            let pr = &st.props[b];
+            let stock: Vec<String> = (0..15).filter(|&g| pr.stock(g) > 0).map(|g| format!("g{g}:{}", pr.stock(g))).collect();
+            let runs: Vec<String> = st.heap.all(8, h as u8, mad_sim::heap::ANY).into_iter().filter(|&i| st.heap.recs[i][2] as usize == b).map(|i| format!("g{} w{} m{}", st.heap.recs[i][4], st.heap.recs[i][5], st.heap.recs[i][6])).collect();
+            println!("  branch {b} in city {}: stock [{}] runs [{}]", pr.loc(), stock.join(" "), runs.join(", "));
+        }
         let mut hist = [0u32; 6];
         for x in st.computers() {
             let f = st.persons[x].favour(h) as usize;
