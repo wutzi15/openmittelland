@@ -12,11 +12,32 @@ Status: playable, far from finished. The simulation, the Kontor and its rooms, t
 
 Today that means DOSBox, and DOSBox is a poor way to play it: the mouse is captured and drifts, the window is either tiny or blurry, sound needs setting up, saves sit inside an emulated drive, and the whole thing runs a 1990s DOS extender just to show a 640×480 picture. OpenMittelland runs the same game natively on Windows, macOS and Linux, from the files of your own copy, as a normal program you double-click.
 
-## Playing
+## Running
 
-Download the archive for your system from the [releases page](../../releases) and start it. On the first start it looks for the game in the usual places (next to the program, your home, Games and Downloads folders, Steam and GOG libraries) and asks for the folder if it finds nothing: pick the game's install folder or the `MITTELL` folder that holds `MITTELL.EXE`. The choice is remembered.
+You need your own copy of *Mittelland AD*: either the installed game (its folder holds `game/disk/MITTELL`, and `soundtrack` with the music) or a DOS install with the `MITTELL` folder (`MITTELL.EXE`, `ICONS2`, `ICONS3`, ...). OpenMittelland only reads these files; it never changes them.
 
-Saves and options go to `%APPDATA%\mittelland-ad` (Windows) or `~/.local/share/mittelland-ad` (macOS, Linux); the original install is never written to.
+Download the archive for your system from the [releases page](../../releases):
+
+- **Windows** (x86_64): unzip, start `OpenMittelland.exe`. SmartScreen may warn about an unknown publisher: "More info" → "Run anyway".
+- **macOS** (Apple silicon and Intel, macOS 11+): unzip and move `OpenMittelland.app` where you like. The app is not notarized, so the first start is refused ("Apple could not verify..."): click "Done", then open System Settings → Privacy & Security and click "Open Anyway" next to OpenMittelland. Or in Terminal: `xattr -dr com.apple.quarantine OpenMittelland.app`.
+- **Linux** (x86_64, glibc 2.34 or newer, e.g. Ubuntu 22.04, Debian 12): unpack and run `./openmittelland`. Needs ALSA (`libasound2`).
+
+On the first start it looks for the game in the usual places (next to the program, your home, Games, Spiele, Downloads, Desktop and Documents folders, Steam and GOG libraries, and on Windows `C:\`, `C:\Games`, `C:\GOG Games`). If it finds nothing it asks for the folder: pick the game's install folder or the `MITTELL` folder itself. The choice is remembered; to change it, delete `data-path.txt` in the saves folder below.
+
+The music plays when the `soundtrack` folder sits where the installed game keeps it (three levels above `MITTELL`); `--music <folder>` points elsewhere.
+
+Saves and options go to `%APPDATA%\mittelland-ad` (Windows) or `~/.local/share/mittelland-ad` (macOS, Linux), `MAD_SAVE_DIR` overrides it. Saves of the original install are offered for loading too.
+
+Command-line options:
+
+| option | effect |
+|---|---|
+| `--data <folder>` (or `MAD_DATA`) | the `MITTELL` folder; skips the search |
+| `--music <folder>` | the soundtrack folder |
+| `--mode 2` / `--mode 3` | 8-bit `ICONS2` or 15-bit `ICONS3` art (3 is the default, as in the original) |
+| `--start intro\|menu\|missions\|players` | the first screen (default: the intro) |
+| `--mute` | no sound |
+| `--save-dir <folder>` | where saves and options are written |
 
 ## Building
 
@@ -24,8 +45,6 @@ Rust 1.100 or newer. Linux needs `libasound2-dev` (ALSA).
 
     cargo build --release -p mad-app
     target/release/mad-app [--data <MITTELL folder>] [--mode 2|3]
-
-`--mode 3` (default, as in the original) draws the 15-bit `ICONS3` art, `--mode 2` the 8-bit `ICONS2` art. `--data` (or `MAD_DATA`) skips the search.
 
     MAD_DATA=<MITTELL folder> cargo test --workspace   # tests needing the original files skip without MAD_DATA
     cargo clippy --workspace --all-targets -- -D warnings
