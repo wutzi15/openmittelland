@@ -1212,6 +1212,43 @@ impl State {
     // ---- year end ----
 
     /// `year_end_world` (0x66220), the documented parts in documented order.
+    /// Year-end record pass (rules-04b §3.6): over the computer persons in slot order (`person_find_first(…,
+    /// controller 0)`), each person's live records in heap order. Year-end parity run 1619 (docs/FIDELITY.md): the
+    /// original's mistress ticks run keeper by keeper in slot order, not in heap order.
+    pub fn computer_record_pass(&mut self, ch: &mut dyn Choices, ev: &mut Vec<Event>) {
+        for o in self.computers().collect::<Vec<_>>() {
+            let mut i = 0;
+            while i < self.heap.recs.len() {
+                if self.heap.live(i) && self.heap.recs[i][1] as usize == o && self.persons[o].used() && !self.persons[o].human() {
+                    let r = &mut self.heap.recs[i];
+                    r[3] = r[3].wrapping_sub(1);
+                    match r[0] {
+                        29 => self.mistress_tick(i, ev),
+                        18 => self.trial(i, ch, ev),
+                        50 => self.revenge_tick(i, ch, ev),
+                        // rules-07 §3b: computer troop records 51..54 have no handler; they are deleted when the
+                        // counter reaches 0 and their troops never return (they were never taken)
+                        25 => self.siege_tick(i, ch, ev),
+                        26 => self.relief_tick(i, ev),
+                        27 => self.tribute_tick(i, ev),
+                        22 => self.duel(i, ev),
+                        28 => {
+                            if self.heap.recs[i][3] == 0 {
+                                self.hold_feast(i, ev);
+                            }
+                        }
+                        _ => {
+                            if self.heap.recs[i][3] == 0 {
+                                self.heap.delete(i);
+                            }
+                        }
+                    }
+                }
+                i += 1;
+            }
+        }
+    }
+
     pub fn year_end(&mut self, ch: &mut dyn Choices) -> Vec<Event> {
         let mut ev = vec![Event::YearEnd { year: self.year }];
         ev.extend(self.year_end_offices(ch));
@@ -1243,11 +1280,13 @@ impl State {
         }
         self.contest_start(ch, &mut ev);
         self.auction_announce(&mut ev);
-        // rules-09 §2.1: ten mistress events for random persons.
+        // rules-09 §2.1 / rules-05 §5: ten mistress events for computer persons drawn with
+        // `person_pick_random(any, computer)` (year-end parity run 1619: the original's picks index the 160 computers,
+        // not the 161 used persons, docs/FIDELITY.md).
         for _ in 0..10 {
-            let pool: Vec<usize> = (0..PERSONS).filter(|&i| self.persons[i].used()).collect();
-            let p = pool[self.r(pool.len() as u32) as usize];
-            self.take_mistress(p, &mut ev);
+            if let Some(p) = self.pick_computer(None) {
+                self.take_mistress(p, &mut ev);
+            }
         }
         self.npc_turns(&mut ev);
         // divine event (rules-06 §3.1 trigger a)
@@ -1256,37 +1295,7 @@ impl State {
             self.globals.set_b(ga::MIRACLE_CHANCE, 0);
             self.divine(&mut ev);
         }
-        // record pass over computer persons (rules-04b §3.6)
-        let mut i = 0;
-        while i < self.heap.recs.len() {
-            let o = self.heap.recs[i][1] as usize;
-            if self.heap.live(i) && o < PERSONS && self.persons[o].used() && !self.persons[o].human() {
-                let r = &mut self.heap.recs[i];
-                r[3] = r[3].wrapping_sub(1);
-                match r[0] {
-                    29 => self.mistress_tick(i, &mut ev),
-                    18 => self.trial(i, ch, &mut ev),
-                    50 => self.revenge_tick(i, ch, &mut ev),
-                    // rules-07 §3b: computer troop records 51..54 have no handler; they are deleted when the
-                    // counter reaches 0 and their troops never return (they were never taken)
-                    25 => self.siege_tick(i, ch, &mut ev),
-                    26 => self.relief_tick(i, &mut ev),
-                    27 => self.tribute_tick(i, &mut ev),
-                    22 => self.duel(i, &mut ev),
-                    28 => {
-                        if self.heap.recs[i][3] == 0 {
-                            self.hold_feast(i, &mut ev);
-                        }
-                    }
-                    _ => {
-                        if self.heap.recs[i][3] == 0 {
-                            self.heap.delete(i);
-                        }
-                    }
-                }
-            }
-            i += 1;
-        }
+        self.computer_record_pass(ch, &mut ev);
         // privilege office income for humans, then treasury reset (rules-04b §4.2)
         for h in self.humans().collect::<Vec<_>>() {
             // turnover, tithe, indulgences: each positive part its own line and credit (rules-40 §27)
@@ -1593,4 +1602,43 @@ mod tests {
             st.apply(Command::EndTurn, &mut Auto);
         }
     }
+
+    /// rules-05 §5: the ten year-end mistress events draw from the computer persons only (year-end parity run 1619,
+    /// docs/FIDELITY.md); a human never gets a lover from the lottery.
+    #[test]
+    fn rules05_s5_mistress_lottery_skips_humans() {
+        for seed in 1..=30 {
+            let mut st = State::new_game(seed, 3, &[HumanSetup::test(6)]).unwrap();
+            st.run(&mut Auto);
+            let h = st.humans().next().unwrap();
+            for _ in 0..5 {
+                st.apply(Command::EndTurn, &mut Auto);
+                assert!(!st.heap.has(29, h as u8), "seed {seed}: the human got a mistress from the year-end lottery");
+            }
+        }
+    }
+
+    /// rules-04b §3.6: the year-end record pass visits the computer persons in slot order (a person's records in
+    /// heap order), not the heap in heap order (year-end parity run 1619: the mistress ticks run keeper by keeper).
+    #[test]
+    fn rules04b_s3_6_record_pass_in_person_order() {
+        let mut st = State::blank(7);
+        st.person_init(5, 0, 0, 0);
+        st.person_init(9, 0, 1, 0);
+        // heap order: 9's record first
+        st.heap.alloc(29, 9, NONE, 2);
+        st.heap.alloc(29, 5, NONE, 2);
+        let (f95, f59) = (st.persons[9].favour(5) as u32, st.persons[5].favour(9) as u32);
+        // person 5 ticks first: standing, then x for every record in heap order (9's, then 5's own); then person 9
+        let mut r = st.rng;
+        r.n(60);
+        let a = 10 + r.n(10);
+        r.n(10);
+        r.n(60);
+        r.n(10);
+        let b = 10 + r.n(10);
+        st.computer_record_pass(&mut Auto, &mut vec![]);
+        assert_eq!((st.persons[9].favour(5) as u32, st.persons[5].favour(9) as u32), (f95 + a, f59 + b));
+    }
+
 }
