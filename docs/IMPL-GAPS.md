@@ -6,8 +6,7 @@ What is still open, what we do differently from the original, and every reading 
 
 ### For the RE role
 Round 8 (rules-66, 2026-11-19) answered the earlier list; built from it: the year-end office cycle as one loop per person, the computers' skill gain and wealth drift through `pay`/`cash_add` with both clamps, the predecessor's bytes kept on turnover (+0x01, +0x05..+0x07, +0x0E, +0x14..+0x17, net-worth cache +0x1C, +0xF4), the computer shipment's random source branch, case 12 no longer an action, the escort evidence bit 0x20000, no report line for refusals and for place texts without a place. The parity diff of the 1619 save dropped from 188 to 27 differing fields. Still open:
-- **Title cap after a dismissal** (`career.rs` `office_year`, SPEC-GAP): rules-66 §1 takes the office index `o` before the dismissal check, so a principality officer dismissed in the same pass would pass `location < 13` with cap 10/11 and reach a title above 9. Ours uses the office after the check. Does the original really raise such a person past title 9 (and what does a title of 10 print)?
-- **Computer shipments**: after the rules-66 fixes the 1619 year end still makes one computer shipment where the original makes three (persons 43, 73, 142); which draw of `npc_act` or `npc_turns` still differs?
+- **Remaining parity difference, 1619 save** (after rules-67, 2026-11-19: 40 of 69 319 bytes differ, every computer shipment and office change matches): the principality's escorted shipment is `c1 [03 …]` in the original and `c2 [02 …]` in ours (kind byte 3 and one more countdown for an escorted record?), and a few cash and favour values differ. Which rule writes kind 3 for an escorted computer shipment?
 - **BattlePending line**: ours only, for a game without `SZENARIO.DAT` (no original counterpart).
 
 ### Needs a live check in the original

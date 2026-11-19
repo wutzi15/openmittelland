@@ -205,16 +205,17 @@ impl State {
                 }
                 6 => {
                     if has(self, p, 85) {
-                        // rules-32 §3.2: the saint is a random human; none, no action
-                        let humans: Vec<usize> = self.humans().collect();
+                        // rules-32 §3.2: the saint is a random human, from the persons with controller 1 (rules-67 §2)
+                        let humans: Vec<usize> = (0..PERSONS).filter(|&x| self.persons[x].used() && self.persons[x].flags10() >> 4 == 1).collect();
                         if humans.is_empty() {
                             continue;
                         }
                         let r = humans[self.r(humans.len() as u32) as usize];
                         line(ev, 0xAD376, vec![WArg::P(p as u8), WArg::P(r as u8), WArg::P(r as u8)]);
-                        let used: Vec<usize> = (0..PERSONS).filter(|&x| self.persons[x].used()).collect();
+                        // the computer clergy, church nibble 1 (rules-67 §2)
+                        let used: Vec<usize> = self.computers().collect();
                         for x in used {
-                            if self.persons[x].church() {
+                            if self.persons[x].flags10() & 0x0F == 1 {
                                 let v = self.ri(10);
                                 self.favour_increase(r, x, v);
                             }
@@ -274,10 +275,9 @@ impl State {
                         if v & bit != 0 && self.human_at(self.persons[p].loc()) {
                             line(ev, 0xA5BF2, vec![WArg::P(p as u8), WArg::Id(2634 + i)]);
                         }
-                        true
-                    } else {
-                        false
                     }
+                    // the insurance toggle is not an action: the try loop goes on (rules-67 §2)
+                    false
                 }
                 _ => {
                     // 17..23 [L mapping]: offence bits only, not counted as the action
@@ -329,8 +329,8 @@ impl State {
                 }
             }
         } else if has(self, p, 58) {
-            // rules-32 §3.2: the project is a random human's; none, no action
-            let humans: Vec<usize> = self.humans().collect();
+            // rules-32 §3.2: the project is a random human's, from the persons with controller 1 (rules-67 §2); none, no action
+            let humans: Vec<usize> = (0..PERSONS).filter(|&x| self.persons[x].used() && self.persons[x].flags10() >> 4 == 1).collect();
             if humans.is_empty() {
                 return false;
             }
@@ -348,7 +348,11 @@ impl State {
     /// Returns the record's counter (3 = escorted), or None when no branch exists.
     fn npc_shipment(&mut self, p: usize, g: usize) -> Option<u8> {
         let avg = self.globals.d(ga::AVG_SHIPMENT) as i32;
-        let mut qty = (avg * (40 + self.ri(120)) / ((50 * g as i32) / 4 + 50)).max(100);
+        let mut qty = avg * (40 + self.ri(120)) / ((50 * g as i32) / 4 + 50);
+        // the minimum compares the low 16 bits (rules-67 §2)
+        if qty & 0xFFFF < 100 {
+            qty = 100;
+        }
         // `property_pick_random(branch, any, any)`: one draw over every branch of every owner (rules-66 §2)
         let branches: Vec<usize> = (0..PROPS).filter(|&i| self.props[i].kind() == KIND_BRANCH).collect();
         if branches.is_empty() {
@@ -371,7 +375,7 @@ impl State {
             r[4] = 2;
             heap::w16(r, 5, qty as u16);
             r[7] = g as u8;
-            r[8] = n.min(255) as u8;
+            r[8] = n as u8; // truncated to a byte (rules-67 §2)
             r[9] = t as u8;
             r[10] = dest as u8;
             r[11] = 90;

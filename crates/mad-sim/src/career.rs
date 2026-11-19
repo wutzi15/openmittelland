@@ -375,9 +375,7 @@ impl State {
                     self.globals.set_office_wealth(o, (w + (raw as i64 - w) / 10).max(0) as u32);
                 } else {
                     let pr = &self.persons[p];
-                    // SPEC-GAP: rules-66 §1 takes o before the dismissal check; a principality officer dismissed in
-                    // this pass would then pass `loc < 13` with cap 10/11 and reach a title above 9. The office
-                    // after the check is used (as before) until the RE confirms; the human update above uses o.
+                    // the office after the check (rules-67 §1): a dismissed person has place 0 and cap 1 here
                     let cap = TITLE_CAP[if pr.has_office() { global_office(pr) } else { 0 }];
                     if pr.loc() < 13 && pr.title() < cap {
                         let t = pr.title() + 1;
