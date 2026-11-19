@@ -775,7 +775,7 @@ checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "mad-app"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "mad-assets",
  "mad-sim",
@@ -789,11 +789,11 @@ dependencies = [
 
 [[package]]
 name = "mad-assets"
-version = "0.1.4"
+version = "0.1.5"
 
 [[package]]
 name = "mad-sim"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "mad-assets",
 ]
