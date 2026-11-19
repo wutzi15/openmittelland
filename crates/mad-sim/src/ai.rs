@@ -229,21 +229,28 @@ impl State {
                 }
                 7..=11 => {
                     let (g, bit, book, law) = [(14, 0x2000, 1, 3), (7, 0x4000, 1, 4), (1, 0x8000, 1, 5), (11, 0x8000000, 2, 7), (12, 0x10000000, 2, 8)][(c - 7) as usize];
-                    self.npc_shipment(p, g);
+                    let escorted = self.npc_shipment(p, g) == Some(3);
                     if self.globals.forbidden(book, law) {
                         w |= bit;
                     }
+                    // an escorted shipment while Eskortierung is outlawed (law book 1, row 7; rules-66 §2)
+                    if escorted && self.globals.forbidden(1, 7) {
+                        w |= 0x20000;
+                    }
                     true
                 }
+                // not an action: the try is used up and the loop goes on (rules-66 §2)
                 12 => {
                     if self.globals.forbidden(0, 2) {
                         w |= 0x04;
                     }
-                    true
+                    false
                 }
                 13 | 14 => {
                     let g = [0, 2, 3, 4, 5, 6, 8, 9, 10, 13][self.r(10) as usize];
-                    self.npc_shipment(p, g);
+                    if self.npc_shipment(p, g) == Some(3) && self.globals.forbidden(1, 7) {
+                        w |= 0x20000;
+                    }
                     true
                 }
                 15 => {
@@ -338,10 +345,17 @@ impl State {
     }
 
     /// §3 trade shipment of computer person p.
-    fn npc_shipment(&mut self, p: usize, g: usize) {
+    /// Returns the record's counter (3 = escorted), or None when no branch exists.
+    fn npc_shipment(&mut self, p: usize, g: usize) -> Option<u8> {
         let avg = self.globals.d(ga::AVG_SHIPMENT) as i32;
         let mut qty = (avg * (40 + self.ri(120)) / ((50 * g as i32) / 4 + 50)).max(100);
-        let Some(src) = (0..PROPS).find(|&i| self.props[i].kind() == KIND_BRANCH) else { return };
+        // `property_pick_random(branch, any, any)`: one draw over every branch of every owner (rules-66 §2)
+        let branches: Vec<usize> = (0..PROPS).filter(|&i| self.props[i].kind() == KIND_BRANCH).collect();
+        if branches.is_empty() {
+            return None;
+        }
+        let src = branches[self.r(branches.len() as u32) as usize];
+        self.last_pick = self.props[src].loc();
         let sc = self.props[src].loc() as usize;
         let counter = 2 + self.r(2) as u8;
         let dest = ((sc as u32 + 1 + self.r(9)) % 10) as usize;
@@ -368,6 +382,7 @@ impl State {
             let toll = self.castles[k].toll_rate as i32 * qty * value(g) / 100;
             self.castles[k].acc = self.castles[k].acc.wrapping_add(((100 - share) * toll / 100) as u32);
         }
+        Some(counter)
     }
 
     /// rules-04b §3.1 computer trial creation (also revenge cases 3, 4).

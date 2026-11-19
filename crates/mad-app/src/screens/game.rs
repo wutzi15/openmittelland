@@ -3176,7 +3176,11 @@ impl Game {
                 let src = if *site { subst(&assets.text(0xC1148), b"%o", &o) } else { subst(&subst(&assets.text(0xC119C), b"%1W", &t(&self.wform(assets, 1, *word))), b"%o", &o) };
                 plain(&src).replacen('-', "- ", 1)
             }
-            Refused(why) => format!("Nicht möglich: {why}"),
+            // the original has no refusal text for these guards and prints nothing (rules-66 §7)
+            Refused(why) => {
+                eprintln!("refused: {why}");
+                return None;
+            }
             BattlePending { .. } => "Ein Kampf konnte nicht ausgetragen werden (SZENARIO.DAT fehlt).".into(),
             AttackDetected { .. } => return None, // told by the captions on the field (rules-50 §2)
             // told in the pre-fight window (rules-52 §2)
@@ -3440,7 +3444,12 @@ impl Game {
                     src = subst(&subst(&src, b"%s", &t(self.loc(*city))), b"%o", &t(self.loc(*city)));
                 }
                 let line = plain(&subst(&src, b"%d", &t(&dotted(amount))));
-                if line.contains('%') { format!("Schicksal {kind}: {line}") } else { line }
+                // a place text without a drawn property: the original prints with a garbage index, ours nothing (rules-66 §7)
+                if line.contains('%') {
+                    eprintln!("fate {kind} without a place: {line}");
+                    return None;
+                }
+                line
             }
             // gossip (ids 2401, 2408 + n) and the mistress/lover of a human (ids 2851, 2856), rules-12 §3.8
             Gossip { person, text } => plain(&subst(&subst(&assets.text_id(2401), b"%1N5", &t(&self.pref(*person, 1, 5))), b"%s", &assets.text_id(2408 + *text as u32))),
@@ -6699,7 +6708,7 @@ pub(crate) mod tests {
         shot(&g, &assets, "scene_court_witness");
         g.popups.clear();
         // rules-19 §4: lines before a scene are flushed ahead of it, lines after it come last
-        g.report(&assets, vec![SimEvent::Refused("vorher"), SimEvent::Duel { winner: c, loser: h, office_lost: true, scene: mad_sim::DuelScene { insulter: c, place: 3, answers: [0, 7], fog: 2, after: 1, taunts: vec![(0, 5, 100, 150), (1, 62, 200, 200)], fx: vec![vec![(150, 0x83), (250, 0x39)], vec![]] } }, SimEvent::Refused("nachher")], vec![]);
+        g.report(&assets, vec![SimEvent::Fine { person: h, amount: 120 }, SimEvent::Duel { winner: c, loser: h, office_lost: true, scene: mad_sim::DuelScene { insulter: c, place: 3, answers: [0, 7], fog: 2, after: 1, taunts: vec![(0, 5, 100, 150), (1, 62, 200, 200)], fx: vec![vec![(150, 0x83), (250, 0x39)], vec![]] } }, SimEvent::Fine { person: h, amount: 120 }], vec![]);
         assert!(matches!(&g.popups[0], Popup::Report(l) if l.len() == 1));
         assert!(matches!(g.popups[3], Popup::Scene { pic: 0xD1, .. }));
         assert!(matches!(&g.popups[5], Popup::Report(l) if l.len() == 1));

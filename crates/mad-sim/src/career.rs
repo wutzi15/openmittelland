@@ -122,20 +122,6 @@ impl State {
         let x = if self.persons[a].religion() != self.persons[b].religion() { x / 2 } else { x };
         self.persons[b].set_favour(a, (f + x).clamp(0, 100) as u8);
     }
-    /// §4.2 every favour < 10 rises by rand(2), person by person, target by target.
-    pub fn favour_floor(&mut self) {
-        for a in 0..PERSONS {
-            if !self.persons[a].used() {
-                continue;
-            }
-            for b in 0..PERSONS {
-                if self.persons[a].favour(b) < 10 {
-                    let v = self.persons[a].favour(b) + self.r(2) as u8;
-                    self.persons[a].set_favour(b, v);
-                }
-            }
-        }
-    }
 }
 
 // ---- titles (§2) ----
@@ -328,11 +314,17 @@ impl State {
     }
 
     /// `person_init_wealth(p, pct, max)`: cash moves pct % of (target - NW), at most `max`.
+    /// `person_init_wealth` 0x42EA0 (rules-66 §4): above the target the gap is paid (`pay`, floor -9 999 999),
+    /// below it is added (`cash_add`, top +9 999 999), at most `max` either way.
     pub fn init_wealth(&mut self, p: usize, pct: i32, max: i32) {
         let target = self.globals.office_wealth(global_office(&self.persons[p])) as i32;
         let nw = self.net_worth(p);
-        let d = ((target as i64 - nw as i64) * pct as i64 / 100).clamp(-max as i64, max as i64) as i32;
-        self.add_cash(p, d);
+        let d = (pct as i64 * (nw as i64 - target as i64) / 100) as i32;
+        if d > 0 {
+            self.pay(p, d.min(max));
+        } else {
+            self.add_cash(p, (-d).min(max));
+        }
     }
 
     /// §4.1 human_rival_of(h).
@@ -359,15 +351,54 @@ impl State {
         snap.iter().find(|&&(_, r)| r == p).map_or(NONE, |&(h, _)| h as u8)
     }
 
-    /// §4.3 dismissal for losing wealth.
-    fn dismissals(&mut self, snap: &[(usize, usize)], ev: &mut Vec<Event>) {
+    /// §4.2-§4.4 as one loop over the person slots (rules-66 §1): per used person the favour floor of his row, the
+    /// dismissal check, the net-worth cache, then a computer's title cap, skill gain and wealth drift or a human's
+    /// office-wealth update; the denunciation flag is cleared for every slot.
+    fn office_year(&mut self, snap: &[(usize, usize)], ev: &mut Vec<Event>) {
         for p in 0..PERSONS {
-            if !self.persons[p].used() {
-                continue;
+            if self.persons[p].used() {
+                for b in 0..PERSONS {
+                    if self.persons[p].favour(b) < 10 {
+                        let v = self.persons[p].favour(b) + self.r(2) as u8;
+                        self.persons[p].set_favour(b, v);
+                    }
+                }
+                let raw = self.net_worth(p);
+                let nw = raw.max(0);
+                let o = if self.persons[p].has_office() { global_office(&self.persons[p]) } else { 0 };
+                if self.persons[p].has_office() {
+                    self.dismissal_check(p, nw, snap, ev);
+                }
+                self.persons[p].set_nw_cache(nw);
+                if self.persons[p].human() {
+                    let w = self.globals.office_wealth(o) as i64;
+                    self.globals.set_office_wealth(o, (w + (raw as i64 - w) / 10).max(0) as u32);
+                } else {
+                    let pr = &self.persons[p];
+                    // SPEC-GAP: rules-66 §1 takes o before the dismissal check; a principality officer dismissed in
+                    // this pass would then pass `loc < 13` with cap 10/11 and reach a title above 9. The office
+                    // after the check is used (as before) until the RE confirms; the human update above uses o.
+                    let cap = TITLE_CAP[if pr.has_office() { global_office(pr) } else { 0 }];
+                    if pr.loc() < 13 && pr.title() < cap {
+                        let t = pr.title() + 1;
+                        self.persons[p].set_title(t);
+                    }
+                    // skill gain: x = 2 + rand(5), good rand(15), cap 150 (rules-40 §4, rules-66 §1)
+                    let x = 2 + self.r(5);
+                    let g = self.r(15) as usize;
+                    self.skill_up(p, g, x);
+                    self.init_wealth(p, 20, 7000);
+                }
             }
-            let nw = self.net_worth(p).max(0);
+            self.persons[p].set_denounced(0);
+        }
+    }
+
+    /// §4.3 dismissal for losing wealth, for one office holder.
+    fn dismissal_check(&mut self, p: usize, nw: i32, snap: &[(usize, usize)], ev: &mut Vec<Event>) {
+        {
             let old = self.persons[p].nw_cache();
-            if self.persons[p].has_office() && (nw < old || self.persons[p].denounced() != 0) {
+            if nw < old || self.persons[p].denounced() != 0 {
                 // NW·100 wraps in i32 as in the original (rules-55 §6). Deliberate deviation: old = 0 (reached
                 // only after an Anschwärzen) is an unguarded divide fault in the original; r = 0 here
                 let r = nw.wrapping_mul(100).checked_div(old).unwrap_or(0);
@@ -391,34 +422,6 @@ impl State {
                     }
                     ev.push(Event::Dismissed { person: p as u8, by, loc: loc as u8, idx: idx as u8, rival });
                 }
-            }
-            self.persons[p].set_nw_cache(nw);
-            self.persons[p].set_denounced(0);
-        }
-    }
-
-    /// §4.4 wealth drift.
-    fn wealth_drift(&mut self) {
-        for p in 0..PERSONS {
-            if !self.persons[p].used() {
-                continue;
-            }
-            if self.persons[p].human() {
-                let o = global_office(&self.persons[p]);
-                let w = self.globals.office_wealth(o) as i64;
-                let nw = self.net_worth(p) as i64;
-                self.globals.set_office_wealth(o, (w + (nw - w) / 10).max(0) as u32);
-            } else {
-                let pr = &self.persons[p];
-                if pr.loc() < 13 && pr.title() < TITLE_CAP[global_office(pr)] {
-                    let t = pr.title() + 1;
-                    self.persons[p].set_title(t);
-                }
-                // skill gain: x = 2 + rand(5), good rand(15), cap 150 (rules-40 §4)
-                let x = 2 + self.r(5);
-                let g = self.r(15) as usize;
-                self.skill_up(p, g, x);
-                self.init_wealth(p, 20, 7000);
             }
         }
     }
@@ -444,7 +447,13 @@ impl State {
             self.vacate_silently(x);
             let female = self.r(4) == 0;
             let name = if female { self.r(70) } else { self.r(117) };
+            // 0x42CF0 writes only its own fields; the rest of the predecessor's record stays, the net-worth cache
+            // among it, so the newcomer's first dismissal check compares with the old wealth (rules-66 §3)
+            let old = self.persons[x].0;
             self.person_init(x, female as u8, name as u8, 0);
+            for k in [0x01, 0x05, 0x06, 0x07, 0x0E, 0x14, 0x15, 0x16, 0x17, 0x1C, 0x1D, 0x1E, 0x1F, 0xF4] {
+                self.persons[x].0[k] = old[k];
+            }
             let t = 1 + self.r(2) as u8;
             self.persons[x].set_title(t);
             self.init_wealth(x, 100, 10_000_000);
@@ -730,9 +739,7 @@ impl State {
                 self.favour_decrease(h, r, x);
             }
         }
-        self.favour_floor();
-        self.dismissals(&snap, &mut ev);
-        self.wealth_drift();
+        self.office_year(&snap, &mut ev);
         self.turnover(&mut ev);
         self.fill_vacancies(&snap, ch, &mut ev);
         ev
