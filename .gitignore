@@ -3,3 +3,4 @@ assets/
 *.tar
 .claude/worktrees/
 /dist
+__pycache__/
