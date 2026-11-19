@@ -1,9 +1,11 @@
-## What's new in 0.1.6
+## What's new in 0.1.7
 
-- **The turn end reads as one window, as in the original.** Courtship gifts and adventure offers appear under the report text so far instead of in a window of their own. An answered menu stays in place with your choice's reaction right under it, and the report continues where it stopped instead of starting a new page.
+- **Computer persons act like in the original.** A computer person who changes his insurance still gets his action that year (trade shipments, projects and so on), as in the original; before, it used up his turn. Measured side by side on a playtest save from 1619 (with the random generator re-synchronised at the year end, since the original keeps drawing numbers while the debtors' tower waits for a click): the resulting save matches the original's except for 40 bytes of 69 319, with every computer shipment, office change, dismissal and election identical.
+- Smaller fixes from the same comparison: the right human is picked for computer projects and the saint's blessing, only computer clergy are blessed, and shipment sizes and cart counts follow the original's arithmetic.
 
 ## Recently
 
+- **0.1.6**: the turn end reads as one window: courtship gifts and adventure offers appear under the report text, answered menus stay in place.
 - **0.1.5**: the year end follows the original more closely: one pass per person for favour, dismissals and wealth; computer persons' wealth stays within the cash limits; a replaced person inherits the predecessor's stored wealth; computer trade shipments start from a random branch. No more invented "Nicht möglich" lines.
 - **0.1.4**: the bribery map switches to the church level again; election bullets only appear when you vote.
 - **0.1.3**: naming a baby no longer jumps to the next window; long adventure menus scroll so every choice is visible; goods a branch holds but its city does not produce (e.g. after a stolen order book) can be sold.
