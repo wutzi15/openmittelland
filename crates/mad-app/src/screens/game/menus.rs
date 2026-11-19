@@ -773,7 +773,9 @@ impl Game {
                 };
                 const COL: [i32; 34] = [0, 2, 4, 0, 2, 4, 2, 1, 3, 2, 0, 2, 4, 0, 2, 4, 2, 2, 0, 2, 3, 1, 2, 0, 2, 4, 0, 2, 4, 2, 2, 1, 3, 2];
                 const ROW: [i32; 34] = [5, 5, 5, 3, 3, 3, 1, 4, 4, 2, 6, 6, 6, 4, 4, 4, 2, 0, 5, 5, 3, 3, 1, 6, 6, 6, 4, 4, 4, 2, 0, 4, 4, 2];
-                // the level toggle redraws the same window (rules-31 §6), it does not stack a second one
+                // the level toggle redraws the same window in its place (rules-31 §6), it does not stack a second one
+                // (playtest: the church level went behind the bribery map)
+                let at = self.popups.iter().position(|p| matches!(p, super::Popup::Choice { menu: Some(Menu::Tree(..)), .. }));
                 self.popups.retain(|p| !matches!(p, super::Popup::Choice { menu: Some(Menu::Tree(..)), .. }));
                 let rival = self.st.clone().rival_of(h);
                 self.tree_bars.clear();
@@ -816,7 +818,11 @@ impl Game {
                     }
                 }
                 f.raw(b"$1s$|$364{$C").item(t(if church { "Zur weltlichen Ebene..." } else { "Zur kirchlichen Ebene..." }), Action::Open(Menu::Tree(plot, loc, !church)));
-                self.popups.push_back(f.popup_at([20, 40, 600, 400]).with_menu(m));
+                let w = f.popup_at([20, 40, 600, 400]).with_menu(m);
+                match at {
+                    Some(k) => self.popups.insert(k, w),
+                    None => self.popups.push_back(w),
+                }
                 return;
             }
             Menu::Listener(v) => {

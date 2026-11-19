@@ -748,8 +748,11 @@ impl Elect {
             let y = 150 + 24 * i as i32;
             // bullet item (style 0x90, glyph 0x73) at x 120, the name at x 150 (rules-15 §3.4 step 2)
             // at a vote prompt the line under the pointer lights its gem (0x74), as every gem does
-            let lit = self.steps.get(self.pos).is_some_and(|st| st.ask) && self.line_at(mouse) == Some(i);
-            frame.blit(&assets.icon(if lit { 0x74 } else { 0x73 })[0], 120, y + 3);
+            // the gems show only in an election a human votes in (playtest report: not when he only applies)
+            if self.steps.iter().any(|st| st.ask) {
+                let lit = self.steps.get(self.pos).is_some_and(|st| st.ask) && self.line_at(mouse) == Some(i);
+                frame.blit(&assets.icon(if lit { 0x74 } else { 0x73 })[0], 120, y + 3);
+            }
             caption(assets, [150, y - 2, 490, 24], name).draw_text(frame, assets);
             // coins stack right to left in front of the bullet, at most six (step 4)
             for k in 0..n.min(6) as i32 {
@@ -6948,6 +6951,26 @@ pub(crate) mod tests {
         g.open(&assets, Menu::Tree(Plot::Priv(81), 1, false));
         let Some(Popup::Choice { acts, .. }) = g.popups.front() else { panic!() };
         assert!(acts.iter().any(|a| matches!(a, Action::Inline(_, _, [120, 140, 400, 200]))));
+    }
+
+    /// The bribery map (rules-64 §1): a place opens its office tree, and the level toggle shows the church level in
+    /// the same window, in front of the map (playtest: the church level could not be reached).
+    #[test]
+    fn real_bribe_tree_church_level() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        g.popups.clear();
+        g.open(&assets, Menu::Targets(Plot::Bribe));
+        assert!(matches!(g.popups.front(), Some(Popup::Map(Plot::Bribe))));
+        // what a click on a place does
+        g.reopen(&assets, Menu::Tree(Plot::Bribe, 3, false));
+        let Some(Popup::Choice { menu: Some(Menu::Tree(_, 3, false)), acts, .. }) = g.popups.front() else { panic!("the secular tree in front") };
+        let toggle = acts.iter().find(|a| matches!(a, Action::Open(Menu::Tree(_, _, true)))).cloned().expect("the level toggle");
+        g.act(toggle, &mut ctx);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Tree(_, 3, true)), .. })), "the church tree in front");
+        assert_eq!(g.popups.iter().filter(|p| matches!(p, Popup::Choice { menu: Some(Menu::Tree(..)), .. })).count(), 1);
     }
 
     /// Privilege dialogs (rules-38 §2): insurance, bless a county, law editing, a donation, an army, a project.
