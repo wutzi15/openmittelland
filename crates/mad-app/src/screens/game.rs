@@ -653,6 +653,8 @@ enum Action {
     SaveName(u8),
     /// Select bullet k of the open list (icon 0x74), or clear it when it is selected (rules-34 §3.1, rules-35 §1).
     Select(u32),
+    /// An item that does nothing: the gems of menus answered earlier in the same turn-end window.
+    Inert,
     /// Confirm with the selected bullet: run the k-th of these actions, nothing without a selection.
     /// (`true`: close when nothing is selected, Wohnsitz bauen; `false`: stay, director and Wohnsitz kaufen)
     WithSel(Vec<Action>, bool),
@@ -929,11 +931,7 @@ impl Popup {
 
     fn window(&self, assets: &Assets, lit: &[usize]) -> Option<Window> {
         Some(match self {
-            Popup::Report(lines) => {
-                let n = lines.iter().filter(|l| l.starts_with(RAW)).map(|l| l.matches("%m").count()).sum();
-                let items = vec![b"   ".as_slice(); n];
-                Window::new(assets, REPORT_BOX, &report_src(lines), &items, &[], &[]).with_scroll()
-            }
+            Popup::Report(lines) => report_window(assets, lines),
             Popup::Bill(src, _) => Window::new(assets, REPORT_BOX, src, &[], &[], &[]).with_scroll(),
             Popup::Scene { boxes, .. } | Popup::Court { boxes, .. } => caption(assets, boxes[0].0, &boxes[0].1),
             Popup::Election(_) => return None,
@@ -1075,9 +1073,12 @@ pub struct Game {
     church: u8,
     /// the player's cash at the point a pending turn-end question was reached (the bill paid): the banner shows it
     pending_cash: Option<i32>,
-    /// lines of a menu answered inside the turn-end report window (the gifts, rules-63 §2): the window goes on
-    /// with them on top
-    carry_lines: Vec<String>,
+    /// The turn-end report window so far while its questions are asked (rules-63 §2, rules-13): the lines shown and
+    /// the answered menus (`RAW` lines). The original prints the whole turn end into one window; each window here
+    /// starts with this and continues at its end.
+    window: Vec<String>,
+    /// (report window identity, lines at its top that an earlier window of the same turn end already showed)
+    continued: Option<(usize, usize)>,
     /// the question open in the turn-end report window (markup, item labels), as last built
     report_menu: Option<(Vec<u8>, Vec<Vec<u8>>)>,
     /// `report` runs for the turn-end lines shown before a question (`Choices::show`), the turn end goes on
@@ -1162,6 +1163,13 @@ fn answered(src: &[u8], items: &[Vec<u8>]) -> Vec<u8> {
 
 fn raw_line(src: &[u8]) -> String {
     std::iter::once(RAW).chain(src.iter().map(|&b| b as char)).collect()
+}
+
+/// The turn-end report window for `lines` (answered menus keep their gem items).
+fn report_window(assets: &Assets, lines: &[String]) -> Window {
+    let n = lines.iter().filter(|l| l.starts_with(RAW)).map(|l| l.matches("%m").count()).sum();
+    let items = vec![b"   ".as_slice(); n];
+    Window::new(assets, REPORT_BOX, &report_src(lines), &items, &[], &[]).with_scroll()
 }
 
 fn report_src(lines: &[String]) -> Vec<u8> {
@@ -1268,7 +1276,8 @@ impl Game {
             cradles: vec![],
             church: 0,
             pending_cash: None,
-            carry_lines: vec![],
+            window: vec![],
+            continued: None,
             report_menu: None,
             reporting_early: false,
             apply_rivals: vec![],
@@ -2087,9 +2096,20 @@ impl Game {
             self.popups.push_back(f.popup_at([160, 160, 320, 160]));
         }
         if year_end { world_lines.extend(asked) } else { turn_lines.extend(asked) }
-        // after a menu inside the turn-end window the same window goes on (rules-63 §2: the reaction under the menu)
-        if !self.carry_lines.is_empty() {
-            turn_lines.splice(0..0, std::mem::take(&mut self.carry_lines));
+        // the turn-end window goes on with what it showed before a question, menus included (rules-63 §2: the
+        // reaction under the menu; rules-13); it ends with the turn end
+        let prefix = self.window.len();
+        turn_lines.splice(0..0, self.window.iter().cloned());
+        if self.reporting_early {
+            self.window = turn_lines.clone();
+        } else {
+            self.window.clear();
+        }
+        if self.reporting_early && turn_lines.len() == prefix {
+            turn_lines.clear();
+        }
+        if prefix > 0 && !turn_lines.is_empty() {
+            self.continued = Some((turn_lines.as_ptr() as usize, prefix));
         }
         if !turn_lines.is_empty() {
             // its banner shows the cash at the end of the turn-end settlement, not after the year end
@@ -2595,6 +2615,20 @@ impl Game {
             && self.scroll.key != key
         {
             self.scroll = ReportScroll { s: 0, target: 0, bottom: 12 + 24 * ((h - 12) / 24), key };
+            // a window that goes on from an earlier one of the same turn end opens where that one ended and lets the
+            // next window of lines in from there
+            if let Some((k, n)) = self.continued
+                && k == key
+                && let Some(Popup::Report(lines)) = self.popups.front()
+            {
+                let total = self.report_geom(assets).map_or(0, |g| g.1);
+                let shown = report_window(assets, &lines[..n.min(lines.len())]).laid.height;
+                let max_s = (total - h).max(0);
+                // whole lines, as the question window before it scrolled (`Popup::window`), so the switch does not jump
+                let s = (((shown - (12 + 24 * ((h - 12) / 24))).max(0) + 23) / 24 * 24).clamp(0, max_s);
+                let bottom = shown + 24 * (h / 24);
+                self.scroll = ReportScroll { s, target: (bottom - h).clamp(s, max_s), bottom, key };
+            }
         }
     }
 
@@ -4317,7 +4351,7 @@ impl Game {
                     self.run_cmd(ctx.assets, cmd, answers);
                 }
             }
-            Action::Select(_) => {}
+            Action::Select(_) | Action::Inert => {}
             Action::WithSel(acts, _) => {
                 let Some(k) = self.sel.take() else { return Next::Stay };
                 if let Some(a) = acts.get(k as usize).cloned() {
@@ -4331,7 +4365,7 @@ impl Game {
                     // a menu printed into the report window (gifts, sub-plots) stays there, the reaction prints right
                     // under it (rules-63 §2, rules-13)
                     if let Some((src, items)) = self.report_menu.take() {
-                        self.carry_lines.push(raw_line(&answered(&src, &items)));
+                        self.window.push(raw_line(&answered(&src, &items)));
                     }
                     self.run_cmd(ctx.assets, cmd, answers);
                     if let Ask::Match { target, .. } = ask {
@@ -5518,7 +5552,7 @@ impl Game {
                     f.blit(&assets.icon(0x1B9)[0], 20, 40);
                 }
             });
-            if let Popup::Choice { gems: true, items, .. } = p {
+            if let Popup::Choice { gems: true, items, acts, .. } = p {
                 // measured: the gem sits 21 px left of the choice text, centred on its row
                 let w2 = p.window(assets, &[]).unwrap();
                 for (k, item) in items.iter().enumerate() {
@@ -5528,7 +5562,8 @@ impl Game {
                     let selected = self.sel == Some(k as u32) && self.sel_menu.is_some_and(|m| matches!(p, Popup::Choice { menu: Some(x), .. } if *x == m));
                     // the contest entry is a multi-select: every chosen discipline keeps its gem lit
                     let chosen = k < 5 && matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::ContestEntry { .. })) && self.amount >> k & 1 == 1;
-                    let id = if selected || chosen || hover.contains(&k) { 0x74 } else { 0x73 };
+                    let live = !matches!(acts.get(k), Some(Action::Inert));
+                    let id = if selected || chosen || (live && hover.contains(&k)) { 0x74 } else { 0x73 };
                     // the bullet is the item itself (`%a`), its top on the line's top (live A/B: Kerzen, Optionen);
                     // a spinner digit next to it is no bullet
                     // scrolled report-window menus: no gem above or below the window
@@ -5975,13 +6010,17 @@ pub(crate) mod tests {
         let last = w.item_rect(w.laid.items.len() - 1);
         assert!(last.y + last.h <= REPORT_BOX[1] + REPORT_BOX[3], "last choice at {}", last.y);
         g.act(Action::Answer(1), &mut ctx);
-        // the dialog stays on top, the refusal (0xAA202) under it; the gift is not repeated
+        // one turn-end window: gift menu, reaction, the inventor's dialog, the refusal (0xAA202) under it
         let after: Vec<String> = g.popups.iter().map(text).collect();
         let refusal = plain(&assets.text(0xAA202));
         let r = after.iter().find(|s| s.contains(&refusal[..20])).expect("refusal line");
-        assert!(r.starts_with(&dialog[..20]) && !r.contains("schenken"), "{r}");
+        let at = |x: &str| r.find(x).unwrap_or_else(|| panic!("{x} missing in {r}"));
+        assert!(dialog.contains("schenken") && at("schenken") < at(" ist ") && at(" ist ") < at("Erfinder") && at("Erfinder") < at(&refusal[..20]), "{r}");
         let k = g.popups.iter().position(|p| text(p).contains(&refusal[..20])).unwrap();
         g.popups.drain(..k);
+        // it opens where the dialog's window ended, not at the top
+        g.scroll_sync(&assets);
+        assert!(g.scroll.s > 0, "continued window starts at the top");
         shot(&g, &assets, "subplot_after_gift");
     }
 

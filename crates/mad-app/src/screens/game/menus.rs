@@ -909,6 +909,12 @@ impl Game {
                 if matches!(q, mad_sim::Ask::Gift { .. } | mad_sim::Ask::Plot { .. }) {
                     // rules-63 §2, rules-13: printed into the turn-end report window, no dialog of their own
                     self.report_menu = Some((f.src.clone(), f.items.clone()));
+                    // the window's text so far stands above the question; the gems of menus answered before are inert
+                    let pre = super::report_src(&self.window);
+                    let n = pre.windows(2).filter(|w| w == b"%m").count();
+                    f.src.splice(0..0, pre);
+                    f.items.splice(0..0, std::iter::repeat_n(b"   ".to_vec(), n));
+                    f.acts.splice(0..0, std::iter::repeat_n(Action::Inert, n));
                     self.popups.push_back(f.popup_at(super::REPORT_BOX).with_menu(m));
                     return;
                 }
