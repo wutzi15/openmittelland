@@ -345,7 +345,7 @@ impl State {
     }
 
     /// §3 trade shipment of computer person p.
-    /// Returns the record's counter (3 = escorted), or None when no branch exists.
+    /// Returns the record's kind (3 = escorted), or None when no branch exists.
     fn npc_shipment(&mut self, p: usize, g: usize) -> Option<u8> {
         let avg = self.globals.d(ga::AVG_SHIPMENT) as i32;
         let mut qty = avg * (40 + self.ri(120)) / ((50 * g as i32) / 4 + 50);
@@ -361,7 +361,8 @@ impl State {
         let src = branches[self.r(branches.len() as u32) as usize];
         self.last_pick = self.props[src].loc();
         let sc = self.props[src].loc() as usize;
-        let counter = 2 + self.r(2) as u8;
+        // the draw picks the kind (2 plain, 3 escorted); the countdown is always 2 (1619 parity, rec `c1 [03 …]`)
+        let kind = 2 + self.r(2) as u8;
         let dest = ((sc as u32 + 1 + self.r(9)) % 10) as usize;
         let (mut t, mut n) = (KARREN, (qty + 99) / 100);
         if navigable(sc) && navigable(dest) {
@@ -370,9 +371,9 @@ impl State {
             n = (qty + 999) / 1000;
         }
         let qty = qty.min(u16::MAX as i32);
-        if let Some(i) = self.heap.alloc(9, p as u8, src as u8, counter) {
+        if let Some(i) = self.heap.alloc(9, p as u8, src as u8, 2) {
             let r = &mut self.heap.recs[i];
-            r[4] = 2;
+            r[4] = kind;
             heap::w16(r, 5, qty as u16);
             r[7] = g as u8;
             r[8] = n as u8; // truncated to a byte (rules-67 §2)
@@ -386,7 +387,7 @@ impl State {
             let toll = self.castles[k].toll_rate as i32 * qty * value(g) / 100;
             self.castles[k].acc = self.castles[k].acc.wrapping_add(((100 - share) * toll / 100) as u32);
         }
-        Some(counter)
+        Some(kind)
     }
 
     /// rules-04b §3.1 computer trial creation (also revenge cases 3, 4).

@@ -18,6 +18,8 @@ impl Choices for Passive {
             Ask::Building { .. } => 5,
             Ask::PickDirector { candidates, .. } => candidates.len() as u32,
             Ask::Plea => 7,
+            // yes/no sub-plot dialogs: 1 refuses (the original run answered every bullet menu with its last line)
+            Ask::Plot { .. } => 1,
             _ => 0,
         }
     }
@@ -25,7 +27,7 @@ impl Choices for Passive {
 
 const COLS: &[&str] = &[
     "year", "nw_mean", "nw_med", "nw_p10", "nw_p90", "cash_med", "c_branch", "c_castle", "c_resid", "c_married", "pop", "price", "wealth",
-    "fav_mean", "fav<=50", "h_cash", "h_nw", "h_title", "offices", "off_chg", "dismiss", "replaced",
+    "fav_mean", "fav<=50", "h_cash", "h_nw", "h_title", "offices", "off_chg", "off_new", "dismiss", "replaced", "h_loans", "h_tower",
 ];
 
 fn pct(v: &[i64], q: f64) -> f64 {
@@ -59,10 +61,13 @@ fn row(st: &State, prev: Option<&State>) -> Vec<f64> {
     let fav_mean = fav.iter().map(|&f| f as f64).sum::<f64>() / fav.len().max(1) as f64;
     let fav_low = 100.0 * fav.iter().filter(|&&f| f <= 50).count() as f64 / fav.len().max(1) as f64;
     let off = offices(st);
-    let (mut chg, mut dis, mut rep) = (f64::NAN, f64::NAN, f64::NAN);
-    if let Some(pv) = prev {
+    let (mut chg, mut new, mut dis, mut rep) = (f64::NAN, f64::NAN, f64::NAN, f64::NAN);
+    // only consecutive years: a human in a tower gets no turn, so ours can skip a year start
+    if let Some(pv) = prev.filter(|pv| pv.year + 1 == st.year) {
         let po = offices(pv);
         chg = off.iter().filter(|(k, v)| po.get(k) != Some(v)).count() as f64;
+        // changed seats whose new holder held no office a year ago (or is a new person)
+        new = off.iter().filter(|&(k, &v)| po.get(k) != Some(&v) && (!pv.persons[v].has_office() || replaced(&pv.persons[v], &st.persons[v]))).count() as f64;
         rep = (0..PERSONS).filter(|&i| replaced(&pv.persons[i], &st.persons[i])).count() as f64;
         dis = po.values().filter(|&&i| st.persons[i].used() && !replaced(&pv.persons[i], &st.persons[i]) && !st.persons[i].has_office()).count() as f64;
     }
@@ -87,8 +92,12 @@ fn row(st: &State, prev: Option<&State>) -> Vec<f64> {
         h.map_or(f64::NAN, |h| st.persons[h].title() as f64),
         off.len() as f64,
         chg,
+        new,
         dis,
         rep,
+        h.map_or(f64::NAN, |h| st.loans_of(h) as f64),
+        // history entries with code 0: turns skipped in a tower (rules-04b §2)
+        h.map_or(f64::NAN, |h| st.heap.recs.iter().filter(|r| r[0] == 57 && r[1] as usize == h && r[4] == 0).count() as f64),
     ]
 }
 
