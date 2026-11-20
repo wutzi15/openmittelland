@@ -221,18 +221,19 @@ impl State {
                 self.r(10) as u8
             } else {
                 let h = hs[self.r(hs.len() as u32) as usize];
-                self.props_of(h, KIND_BRANCH).next().map_or(0, |b| self.props[b].loc())
+                // a random branch of h (rules-68 §2.1); SPEC-GAP: city 0 when h has none (the original reads a null record)
+                let bs: Vec<usize> = self.props_of(h, KIND_BRANCH).collect();
+                if bs.is_empty() {
+                    0
+                } else {
+                    let k = self.r(bs.len() as u32) as usize;
+                    self.props[bs[k]].loc()
+                }
             };
-            let b = match self.branch_at(p, c as usize) {
-                Some(b) => b,
-                None => match self.property_create(KIND_BRANCH, c, p as u8) {
-                    Some(b) => {
-                        dummies.push(b);
-                        b
-                    }
-                    None => continue,
-                },
-            };
+            // s's own branch in that city becomes the dummy's property; every entry is freed at the end of the day,
+            // found or created, so a computer person can lose a real branch here (rules-68 §2)
+            let Some(b) = self.branch_at(p, c as usize).or_else(|| self.property_create(KIND_BRANCH, c, p as u8)) else { continue };
+            dummies.push(b);
             let res = (self.r(100) << 8) | (self.r(8) << 5) | self.r(10);
             self.props[b].set_residence(res as u16);
             if self.r(100) < 30 {
@@ -314,13 +315,14 @@ impl State {
                             self.hall_line(ch, 2, [0x15A, 0x15C, 0x15E, 0x15B, 0x15D, 0x15F][t.min(5)], 12, seller as u8, w as u8, [cnt as i32, t as i32, loc as i32, price]);
                             ev.push(Event::AuctionSold { lot: n as u8, winner: w as u8, price, kind: 12, loc, count: cnt, typ: t as u8, word: 0 });
                         }
-                        None if !dummies.contains(&b) => {
+                        // unsold: the text for every lot, transporters back to the seller's slot, a dummy's too
+                        // (rules-15 §1, rules-68 §2.2)
+                        None => {
                             if attend {
                                 self.hall_line(ch, 3, 0x15A, 12, seller as u8, 0, [0; 4]);
                             }
                             self.add_transporters(b, t, cnt, cond)
                         }
-                        None => {}
                     }
                 }
                 14 => {
@@ -370,7 +372,7 @@ impl State {
         }
         self.heap.delete(ai);
         for b in dummies {
-            self.props[b] = Property::free();
+            self.free_property(b);
         }
         self.globals.set_b(ga::AUCTION_PAUSE, 4);
     }
@@ -389,6 +391,29 @@ mod tests {
             let ev = st.year_end(&mut crate::Auto);
             assert_eq!(ev.iter().any(|e| matches!(e, Event::Herald { .. })), herald, "counter {c}");
         }
+    }
+
+    /// rules-68 §2: a dummy seller drawn with a branch in the human's city loses that branch at the end of the day;
+    /// created dummy branches go too, and nothing else changes owner.
+    #[test]
+    fn rules68_dummy_frees_real_branch() {
+        let mut hits = 0;
+        for seed in 1..60 {
+            let mut st = State::new_game(seed, 3, &[crate::world::HumanSetup::test(3)]).unwrap();
+            let h = st.current as usize;
+            let city = st.props[st.props_of(h, KIND_BRANCH).next().unwrap()].loc();
+            let used = |st: &State| (0..PROPS).filter(|&i| st.props[i].kind() != KIND_FREE).map(|i| (i, st.props[i].owner())).collect::<Vec<_>>();
+            let before = used(&st);
+            st.heap.alloc(3, NOBODY, NONE, 0);
+            st.auction_settle(&mut crate::Auto, &mut vec![]);
+            let after = used(&st);
+            assert!(after.iter().all(|x| before.contains(x)), "seed {seed}: dummy slot left or owner changed");
+            for &(i, o) in before.iter().filter(|x| !after.contains(x)) {
+                assert_eq!((st.props[i].loc(), st.persons[o as usize].human()), (city, false), "seed {seed}");
+                hits += 1;
+            }
+        }
+        assert!(hits > 0);
     }
 
     struct Rec(Vec<Ask>);

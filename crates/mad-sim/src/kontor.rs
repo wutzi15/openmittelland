@@ -72,9 +72,10 @@ impl State {
         Some(Event::BranchSold { prop: b as u8, price: v })
     }
 
-    /// 0x429A0: free the slot and delete every heap record keyed (byte 2) to it.
+    /// 0x429A0: free the slot and delete every heap record keyed (byte 2) to it. Only kind and owner are written;
+    /// the rest stays until `property_create` zero-fills the slot (rules-68 §1).
     pub fn free_property(&mut self, b: usize) {
-        self.props[b] = Property::free();
+        self.props[b].set_kind(KIND_FREE);
         self.props[b].set_owner(NONE);
         for i in 0..self.heap.recs.len() {
             if self.heap.live(i) && self.heap.recs[i][2] as usize == b {
