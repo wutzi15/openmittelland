@@ -329,3 +329,20 @@ RE questions:
 - rules-03 §4.2–4.4: confirm that `year_end_world` runs favour floor, dismissal check (with `office_vacate`) and wealth drift as one loop over the persons (per person: floor of his row, dismissal, title cap, `rand(5)`, `rand(15)`, wealth), as the stream shows.
 - rules-09 §3: the per-step draws of `npc_act` for a trade shipment (which `rand` calls happen between the `rand(24)` case roll and the type-9 record; the original spent 37 draws for three shipments here, ours 26 for one).
 - rules-03 §4.5 / 0x42CF0: which person bytes the re-initialisation leaves untouched (+0x1C and +0x0E were kept; +0x05..+0x07, +0xF3, +0xF7 unknown).
+
+## Passive long run, 1600-1847 (2026-11-20, `tools/orig/longrun.sh`, `economy_run`)
+One human who never acts (difficulty 3), the original driven headless through 300 year-start autosaves (246 distinct years, 1602-1847; the harness answered every bullet menu with its last line), against our passive game over 40 seeds (`REPLAY=1 economy_run ours 40 247 3`). Every 25 years:
+
+| year | median NW orig / ours | population | price | city wealth | human NW |
+|---|---|---|---|---|---|
+| 1650 | 19 470 / 19 452 | 114 734 / 125 783 | 24.3 / 24.6 | 53.6 / 52.2 | 4 915 / 11 183 |
+| 1700 | 19 771 / 20 784 | 378 863 / 380 792 | 41.2 / 39.1 | 58.1 / 54.2 | 7 421 / 13 904 |
+| 1750 | 30 006 / 36 431 | 1 146 518 / 1 182 443 | 73.4 / 74.5 | 62.8 / 55.4 | 49 072 / 59 875 |
+| 1800 | 104 916 / 104 615 | 3 603 163 / 3 511 496 | 89.5 / 85.6 | 67.1 / 58.4 | 211 558 / 219 805 |
+| 1825 | 166 319 / 154 934 | 6 417 185 / 6 444 992 | 93.1 / 77.1 | 71.7 / 62.1 | 391 072 / 321 679 |
+
+Findings:
+1. **Human ruin is the original's behaviour.** The passive human falls into debt; from about 1640 debt stage 5 rolls between the jury and seizing the last branch every free year (rules-02 §10.2, re-checked in rules-69). The harness logged 56 "crashes": DOSBox exiting after the credits, i.e. the human was ruined, and the harness reloaded the year-start autosave. The original then replays the year from RNG state 1 (it never seeds at program start, rules-69 §7.1), and the autosaves only show years that ended in the jury. Ours goes bankrupt by 1630-1650 in 10 of 12 seeds without replay; with the same replay (`REPLAY=1`) about half our games reach 1847, like the original's. `longrun.sh` now stops at a game end unless `REPLAY=1`.
+2. **Computer branch loss** (rules-68): the original lost one computer branch by 1612 and two by 1665; ours, after the rules-68 build, loses 0.4 by 1630 and 3 by 1825 on average.
+3. **Turnover and offices** match once only consecutive year starts are compared (replacements 4.50 / 3.93 a year, office changes 11.75 / 11.50, dismissals 1.04 / 0.89, 1603-1630).
+4. **City wealth** is the one open drift: +0.103 per city and year in the original, +0.040 in ours (IMPL-GAPS).

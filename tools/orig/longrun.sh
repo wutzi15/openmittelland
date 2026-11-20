@@ -5,8 +5,10 @@
 # Screens are told apart by ImageMagick hashes of fixed crops (Kontor banner, confirm box).
 # A menu with bullets is answered with its last line (copied to OUT/q-N.png). A screen that stays
 # the same through several right clicks gets a left tap, Return, then Escape; still stuck: OUT/stuck.png, exit 3.
-# When DOSBox has exited (the game ended or crashed), the screen before is kept as OUT/crash-N.png and the game is
-# restarted from the last autosave ("Das letzte Spiel fortsetzen").
+# When DOSBox has exited, the screen before is kept as OUT/crash-N.png. That is the game ending (the last human ruined,
+# credits), not a crash: the run stops with exit 4. REPLAY=1 restarts from the last autosave instead ("Das letzte Spiel
+# fortsetzen"); the original then replays the year from RNG state 1 (rules-69 §7), so every later autosave is
+# conditioned on the human surviving that replay. Use it only for statistics that do not depend on the human.
 H=$(cd "$(dirname $0)" && pwd)
 O=$H/orig.sh OUT=$1 MAX=${2:-30}
 : ${INSTALL:?} ${DISK:?}
@@ -23,7 +25,9 @@ while (( n < MAX )); do
   (( i++ % 10 == 0 )) && "$O" shot "$OUT/last.png"
   if ! docker info >/dev/null 2>&1; then echo "$(date +%T) docker down, waiting"; until docker info >/dev/null 2>&1; do sleep 10; done; fi
   if ! alive; then
-    crash=$((crash + 1)); docker cp mad:/tmp/prev.png "$OUT/crash-$crash.png" >/dev/null; echo "$(date +%T) crash $crash after auto-$n, restart"
+    crash=$((crash + 1)); docker cp mad:/tmp/prev.png "$OUT/crash-$crash.png" >/dev/null
+    if [ -z "$REPLAY" ]; then echo "$(date +%T) game ended after auto-$n (crash-$crash.png)"; exit 4; fi
+    echo "$(date +%T) game ended after auto-$n, replay $crash"
     "$O" start; "$O" tap 320 263; sleep 8; continue
   fi
   set -- $(sig "120x24+420+10 200x40+220+190")

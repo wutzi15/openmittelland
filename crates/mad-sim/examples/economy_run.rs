@@ -1,5 +1,5 @@
 //! usage: economy_run orig GAMEn.DAT...            (a series of yearly saves of one game, in year order)
-//!        economy_run ours [seeds] [years] [difficulty]
+//!        economy_run ours [seeds] [years] [difficulty]      (REPLAY=1: replay a ruinous turn end from RNG state 1)
 //! Per-year economy and career metrics of a passive one-human game: the original's autosaves against N seeds of
 //! ours (`Passive` answers, no Kontor commands). Each row is the state at a year start; the turnover columns
 //! compare it with the row before. `ours` prints the mean over the seeds.
@@ -108,8 +108,10 @@ fn print(rows: &[Vec<f64>]) {
     }
 }
 
-/// Yearly states of one passive game of ours, from the new game to `years` later.
-fn ours(seed: u32, years: u16, difficulty: u8) -> Vec<State> {
+/// Yearly states of one passive game of ours, from the new game to `years` later. With `replay`, a turn end that
+/// ruins the human is run again from RNG state 1, as longrun.sh REPLAY=1 does with the original (rules-69 §7: a
+/// reloaded autosave starts at state 1; ours replays from the Kontor, the original from the year start).
+fn ours(seed: u32, years: u16, difficulty: u8, replay: bool) -> Vec<State> {
     let players = [mad_sim::world::HumanSetup { name: "Passiv".into(), gender: 0, religion: 1, colour: 0, hotkey: b'a', city: NONE, mission: None }];
     let mut st = State::new_game(seed, difficulty, &players).expect("new game");
     st.options = 0xFFFF;
@@ -117,7 +119,13 @@ fn ours(seed: u32, years: u16, difficulty: u8) -> Vec<State> {
     st.run(&mut Passive);
     while st.year < 1600 + years && st.humans().next().is_some() {
         let y = st.year;
+        let before = replay.then(|| st.clone());
         st.apply(Command::EndTurn, &mut Passive);
+        if let Some(mut b) = before.filter(|_| st.humans().next().is_none()) {
+            b.rng = Default::default();
+            b.apply(Command::EndTurn, &mut Passive);
+            st = b;
+        }
         if st.year != y {
             out.push(st.clone());
         }
@@ -143,7 +151,7 @@ fn main() {
             // by year: a human in the debtors' tower skips turns, so one EndTurn can pass several years
             let mut acc: std::collections::BTreeMap<u16, (Vec<f64>, Vec<f64>)> = Default::default();
             for seed in 1..=seeds {
-                let sts = ours(seed, years, diff);
+                let sts = ours(seed, years, diff, std::env::var("REPLAY").is_ok());
                 for (k, s) in sts.iter().enumerate() {
                     let r = row(s, k.checked_sub(1).map(|j| &sts[j]));
                     let (sum, cnt) = acc.entry(s.year).or_insert_with(|| (vec![0.0; r.len()], vec![0.0; r.len()]));
