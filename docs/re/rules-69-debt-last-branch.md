@@ -85,3 +85,30 @@ A quick discriminator from the saves: in any free year compute `m` and `debt` as
 - `rules-02` §10.2 stage 3: add the floor: storage area never drops below 2 m² through seizure alone.
 - `rules-02` §10.1: `net_worth` is evaluated three times in the trigger (0x643F0, 0x64422, 0x64459); no state changes between them, so the value is the same, but a port that logs calls will see three.
 - The seizure's `property_free` is the debt caller listed in `rules-68` §1; it is reached only through step 4 with `debt > 0`.
+
+## 7. Follow-up: the roll is fair; the run's evidence is survivorship [C unless marked]
+
+The lead verified the inputs (one slot of any kind owned by p, `net_worth` equal to the original's cached +0x1C, `debt > m/2` from 1640 on, court screen in every free year). So the question became the generator and the harness.
+
+### 7.1 Generator
+
+- The roll at 0x64AE3 is `random_n(100)` = 0x36FF0, the same wrapper as every other draw (100 call sites, `rules-01` §1). 0x36FF0: `rand()` (0x6B491) then `IDIV` by the 16-bit argument, remainder returned; `rand()` is the Watcom LCG `S = S·0x41C64E6D + 0x3039`, result `(S >> 16) & 0x7FFF`. No masking or shifting at the call site: `CMP AX, 0x32; JC` on the remainder 0..99. A fair 50 %.
+- Seed storage 0xB9284, initial value **1** in the image. The only writer is `srand` 0x6B4B5, whose only caller is `randomize_from_time` 0x37030, whose only caller is `battle_main` 0x3EE60 (0x3EEA7). There is **no clock seeding at program start** (xrefs; the other INT 21h AH=2Ch sites 0x107E8, 0x107F0, 0x12DBB, 0x14F5E, 0x6B683, 0x6C0AB are the timers of `rules-01` §5 and do not touch 0xB9284). This corrects `rules-01` §1 item 1 [C for the reference scan, L for "no indirect path"].
+- The RNG state is not part of the save file (`formats.md` §3.2). Hence: **program start + "Das letzte Spiel fortsetzen" replays the loaded year with S = 1 every time.** Two loads of the same autosave with the same clicks produce the same world until a tactical battle reseeds.
+- No reseed exists between the start of a human's turn end and stage 5. Draws before the roll in a passive turn end: sub-plot starter `rand` at 0x64116 only with option bit 2 of 0x86AD1 (Abenteuer); rival grudge `rand(100)` at 0x64148; `rand(100)` at 0x642FD (`< 25` → 0x5B140); then duels/trials of p (none); stages 1–4 draw nothing (no stock, transporters, storage above 2 m², residence); stage 5 step 1 draws nothing while `debt > 0`. So the roll is the third or fourth draw of the turn end, and with a fixed start state its value is fixed.
+
+### 7.2 Same turn
+
+The court block 0x64C8A is entered only through 0x64AF9, i.e. from the `m/2 >= debt` test or the roll in the same stage-5 pass. The court texts 0xC121C and 0xC12F4 are referenced only from 0x64D41/0x64D46 and 0x64DFE/0x64E03 inside this block; there is no second court screen and no unconditional court for a person who sat in the tower. The type-20 tower record only skips the next turn.
+
+### 7.3 What the long run really did [O: `longrun/orig/orig.log`, `crash-*.png`; C: `tools/orig/longrun.sh`]
+
+`longrun.sh` restarts DOSBox from the last autosave ("Das letzte Spiel fortsetzen") whenever the DOSBox process is gone, and logs it as `crash N after auto-K`. The log has 38 such restarts; from `auto-33` (1633) on they come after auto-33, 34, 35, 40, 43, 44, 45, 46, 47, 54, 57, 58, 67, 70, 73, 74, 81, 82, 85, 88, 89, 94, 95, 96, 101, 110, 111, 112, 119, 120, 121, 126, 131, 132, 135, 136, 139, 142: about every second free year. `crash-20.png` is the **credits screen** (Projektleitung …), i.e. the game ended normally, which is what follows the ruin screen of 0x654A9 when the last human has no branch.
+
+So the original **did** seize the last branch in roughly half of the free years. Each time the game ended, the harness reloaded the year-start autosave, the LCG restarted at S = 1, the replayed turn end drew a fixed sequence, and that fixed roll happened to be ≥ 50 → jury → tower → the run survived into the next autosave. The year-start autosaves therefore only ever show years in which either the first attempt or the deterministic replay ended in a jury; the seizures are in `crash-*.png`, not in the saves. There is no bias in the game. The port's bankruptcies by 1630..1650 are the original's behaviour.
+
+### 7.4 Consequences
+
+- `rules-02` §10.2 stays as written. `rules-01` §1: remove "once at program start" from the seeding list; the game starts every session with S = 1 (world generation of a new game is seeded only by the clock-dependent number of draws made before it, e.g. title-screen frames, if any; not traced).
+- Long-run harness: a DOSBox exit after the turn-end confirm box is a game over, not a crash. Count it as "human ruined in year K" and stop or start a new seed; restarting from the autosave replays the year with a fixed RNG and silently filters the outcome.
+- Any A/B statistic taken from the original's year-start autosaves after a restart is conditioned on survival. The computer-branch counts of `rules-68` are unaffected (they do not end the game), but anything that can end the game is.
