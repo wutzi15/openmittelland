@@ -18,7 +18,7 @@ CONFIRM=${CONFIRM:-a7ae3b8c085eed603269007d4a4905f74baabe9c0887d285be6fba3165c4f
 sig() { docker exec mad sh -c "cp /tmp/s.png /tmp/prev.png 2>/dev/null; import -window root /tmp/s.png; for c in 640x480+0+0 $1; do convert /tmp/s.png -crop \$c +repage -format '%#\n' info:; done" | tr '\n' ' '; }
 alive() { docker exec mad sh -c 'cat /proc/[0-9]*/comm 2>/dev/null' | grep -q dosbox; }
 n=$(ls "$OUT"/auto-*.DAT(N) | wc -l | tr -d ' ')
-last=$(stat -f %m "$SAVE") prev= same=0 i=0 crash=0 q=$(ls "$OUT"/q-*.png(N) | wc -l | tr -d " ")
+last=$(stat -f %m "$SAVE") prev= same=0 i=0 crash=0 q=$(ls "$OUT"/q-*.png(N) | sed "s/.*q-//; s/.png//" | sort -n | tail -1); q=${q:-0}
 while (( n < MAX )); do
   (( i++ % 10 == 0 )) && "$O" shot "$OUT/last.png"
   if ! docker info >/dev/null 2>&1; then echo "$(date +%T) docker down, waiting"; until docker info >/dev/null 2>&1; do sleep 10; done; fi
