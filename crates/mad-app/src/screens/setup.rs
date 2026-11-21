@@ -131,11 +131,19 @@ fn replace(src: &[u8], pat: &[u8], with: &[u8]) -> Vec<u8> {
     out
 }
 
+/// The original seeds once per program start from the DOS clock, seconds · 256 + hundredths (rules-70 §1:
+/// 6000 values), before the world is built; a load keeps that seed (the state is not in the save). `MAD_SEED`
+/// overrides it for comparisons. The sim itself stays deterministic.
+pub fn clock_seed() -> u32 {
+    std::env::var("MAD_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+        let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        (ms / 1000 % 60) as u32 * 256 + (ms / 10 % 100) as u32
+    })
+}
+
 impl PlayerSetup {
     pub fn new(difficulty: u8, count: usize) -> Self {
-        // Seeded from the clock: a new game should differ each time; the sim itself stays deterministic.
-        let seed = std::env::var("MAD_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_secs() as u32));
-        Self { difficulty, count, done: vec![], cur: Player::default(), step: Step::Name, world: mad_sim::State::begin_game(seed, difficulty), city: None, code: vec![], notice: None, joining: None }
+        Self { difficulty, count, done: vec![], cur: Player::default(), step: Step::Name, world: mad_sim::State::begin_game(clock_seed(), difficulty), city: None, code: vec![], notice: None, joining: None }
     }
 
     /// One more human in a running game (rules-11 §1); the caller has checked that a city is free.

@@ -7,8 +7,9 @@
 # the same through several right clicks gets a left tap, Return, then Escape; still stuck: OUT/stuck.png, exit 3.
 # When DOSBox has exited, the screen before is kept as OUT/crash-N.png. That is the game ending (the last human ruined,
 # credits), not a crash: the run stops with exit 4. REPLAY=1 restarts from the last autosave instead ("Das letzte Spiel
-# fortsetzen"); the original then replays the year from RNG state 1 (rules-69 §7), so every later autosave is
-# conditioned on the human surviving that replay. Use it only for statistics that do not depend on the human.
+# fortsetzen"); the original reseeds from the clock and autosaves that year again before its first turn (rules-70 §1,
+# rules-69 §7.5), so a restart adds a duplicate auto-N of one year and every later autosave is conditioned on the
+# human surviving the replay. Use it only for statistics that do not depend on the human.
 H=$(cd "$(dirname $0)" && pwd)
 O=$H/orig.sh OUT=$1 MAX=${2:-30}
 : ${INSTALL:?} ${DISK:?}

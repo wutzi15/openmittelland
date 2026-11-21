@@ -112,7 +112,7 @@ fn main_menu_screen(assets: &Assets) -> Box<dyn Screen> {
     Box::new(Dialog::new(t(addr::TITLE), MENU_BOX, text, items, move |k, ctx| match k.map(|k| ids[k]) {
         Some(0) => Next::Go(missions(ctx.assets)),
         Some(1) => Next::Go(load_dialog(ctx.assets)),
-        Some(_) => Next::Go(load_game(ctx.assets, last_slot(ctx.assets))),
+        Some(_) => Next::Go(load_game(ctx.assets, last_slot(ctx.assets), None)),
         None => outro(ctx.assets),
     }))
 }
@@ -176,18 +176,22 @@ fn load_dialog(assets: &Assets) -> Box<dyn Screen> {
     let usable: Vec<bool> = labels.iter().map(Option::is_some).collect();
     let items = labels.into_iter().map(|l| l.unwrap_or(b"^ Leer _".to_vec())).collect();
     Box::new(Dialog::new(assets.text(addr::TITLE), LOAD_BOX, text, items, move |k, ctx| match k {
-        Some(k) if usable[k] => Next::Go(load_game(ctx.assets, k as u8)),
+        Some(k) if usable[k] => Next::Go(load_game(ctx.assets, k as u8, None)),
         Some(_) => Next::Stay,
         None => Next::Go(main_menu_screen(ctx.assets)),
     }))
 }
 
-/// Loads a `GAMEn.DAT` (this app's, else the original's) into the sim and opens the Kontor.
-pub fn load_game(assets: &Assets, slot: u8) -> Box<dyn Screen> {
+/// Loads a `GAMEn.DAT` (this app's, else the original's) into the sim and opens the Kontor. The save holds no
+/// RNG state: a load inside a running game keeps `rng`, one from the menu starts at the session's clock seed.
+pub fn load_game(assets: &Assets, slot: u8, rng: Option<mad_sim::rng::Rng>) -> Box<dyn Screen> {
     let path = assets.save_path(slot);
     let st = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|d| mad_sim::State::from_game_dat(&d, 1));
     match st {
-        Ok(st) => Box::new(Game::start(assets, st)),
+        Ok(mut st) => {
+            st.rng = rng.unwrap_or_else(|| mad_sim::rng::Rng::new(super::setup::clock_seed()));
+            Box::new(Game::start(assets, st))
+        }
         Err(e) => Box::new(Placeholder::new(&format!("{}: {e}", path.display()))),
     }
 }

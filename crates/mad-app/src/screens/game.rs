@@ -4344,7 +4344,7 @@ impl Game {
                 }
                 Err(e) => self.info(ctx.assets, &format!("Fehler beim Speichern: {e}")),
             },
-            Action::Load(k) => return Next::Go(menu::load_game(ctx.assets, k)),
+            Action::Load(k) => return Next::Go(menu::load_game(ctx.assets, k, Some(self.st.rng))),
             Action::AnswerPair(a, b) => {
                 if let Some(Pending { cmd, mut answers, .. }) = self.pending.take() {
                     answers.extend([a, b]);

@@ -1,5 +1,5 @@
 //! usage: economy_run orig GAMEn.DAT...            (a series of yearly saves of one game, in year order)
-//!        economy_run ours [seeds] [years] [difficulty]      (REPLAY=1: replay a ruinous turn end from RNG state 1)
+//!        economy_run ours [seeds] [years] [difficulty]      (REPLAY=1: replay a ruinous turn end with fresh seeds)
 //! Per-year economy and career metrics of a passive one-human game: the original's autosaves against N seeds of
 //! ours (`Passive` answers, no Kontor commands). Each row is the state at a year start; the turnover columns
 //! compare it with the row before. `ours` prints the mean over the seeds.
@@ -109,8 +109,9 @@ fn print(rows: &[Vec<f64>]) {
 }
 
 /// Yearly states of one passive game of ours, from the new game to `years` later. With `replay`, a turn end that
-/// ruins the human is run again from RNG state 1, as longrun.sh REPLAY=1 does with the original (rules-69 §7: a
-/// reloaded autosave starts at state 1; ours replays from the Kontor, the original from the year start).
+/// ruins the human is run again with a fresh seed until the human survives, as longrun.sh REPLAY=1 does with the
+/// original (rules-69 §7.5: a restart reseeds from the clock; ours replays from the Kontor, the original from the
+/// year start).
 fn ours(seed: u32, years: u16, difficulty: u8, replay: bool) -> Vec<State> {
     let players = [mad_sim::world::HumanSetup { name: "Passiv".into(), gender: 0, religion: 1, colour: 0, hotkey: b'a', city: NONE, mission: None }];
     let mut st = State::new_game(seed, difficulty, &players).expect("new game");
@@ -121,8 +122,10 @@ fn ours(seed: u32, years: u16, difficulty: u8, replay: bool) -> Vec<State> {
         let y = st.year;
         let before = replay.then(|| st.clone());
         st.apply(Command::EndTurn, &mut Passive);
-        if let Some(mut b) = before.filter(|_| st.humans().next().is_none()) {
-            b.rng = Default::default();
+        // each restart is a fresh clock seed; the harness restarts until the year survives
+        for k in 0..50u32 {
+            let Some(mut b) = before.clone().filter(|_| st.humans().next().is_none()) else { break };
+            b.rng = mad_sim::rng::Rng::new(seed.wrapping_mul(7919) ^ (y as u32) << 8 ^ k);
             b.apply(Command::EndTurn, &mut Passive);
             st = b;
         }
