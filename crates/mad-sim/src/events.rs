@@ -168,8 +168,8 @@ impl State {
             }
             if self.r(10) < 2 {
                 if d == 2 {
-                    // 64-bit product: since `city_growth` wraps at 32 bits, populations stay below about
-                    // 4.3 million, where `pop * 95` fits 32 bits either way
+                    // 64-bit product as in `city_growth`: late-game populations pass 45 million, where
+                    // `pop * 95` leaves 32 bits (operand width of the original [UNVERIFIED], IMPL-GAPS)
                     let p = (self.cities[c].population() as u64 * 95 / 100) as u32;
                     self.cities[c].set_population(p);
                 }
