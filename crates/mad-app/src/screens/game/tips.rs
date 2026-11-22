@@ -255,11 +255,16 @@ impl Game {
 
 /// The label box: one line of dark text on parchment with a 1 px border, below right of the pointer, kept on screen.
 pub(super) fn draw_tip(frame: &mut Frame, assets: &Assets, tip: &str, mouse: (i32, i32)) {
+    draw_label(frame, assets, tip, (mouse.0 + 14, mouse.1 + 22));
+}
+
+/// A one-line parchment box with a dark border at `at` (clamped to the screen): tooltips and our map buttons.
+pub(super) fn draw_label(frame: &mut Frame, assets: &Assets, tip: &str, at: (i32, i32)) {
     let laid = text::layout(&assets.font, &[b"$t$L".as_slice(), &super::t(tip)].concat(), &[], &[], 640, &[]);
     let tw: i32 = laid.glyphs.iter().map(|g| assets.font.advance[g.2 as usize] as i32).sum();
     let (w, h) = (tw + 12, text::LINE_H);
-    let x = (mouse.0 + 14).min(640 - w).max(0);
-    let y = (mouse.1 + 22).min(480 - h).max(0);
+    let x = at.0.min(640 - w).max(0);
+    let y = at.1.min(480 - h).max(0);
     frame.fill_rgb([x, y, w, h], [64, 40, 16]);
     frame.fill_rgb([x + 1, y + 1, w - 2, h - 2], [226, 202, 150]);
     // the layout starts at the window inset

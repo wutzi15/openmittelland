@@ -150,6 +150,9 @@ fn spots(assets: &Assets, s: Spots, off: (i32, i32), acts: Vec<Action>) -> Vec<H
 /// The Kreditbuch's "Kredit tilgen" icon (`%j`, rules-46 §1).
 const LOAN_ICON: u16 = 0x6A;
 
+/// Top left of the Alles-verkaufen button on the Handel map (ours).
+pub(super) const SELL_ALL_AT: (i32, i32) = (44, 396);
+
 impl Game {
     pub(super) fn room_def(&self, assets: &Assets, r: Room) -> RoomDef {
         let h = self.me().unwrap_or(0);
@@ -172,10 +175,10 @@ impl Game {
                     d.hots.push(Hot { label: vec![], pos: p2, rect: [p2.0, p2.1, w2, h2], act });
                     d.hots.push(Hot { label: vec![], pos: p1, rect: [p1.0, p1.1, w1, h1], act: Action::Open(Menu::City(c as u8)) });
                 }
-                // ours (pref `sell_all`): a labelled spot on the open sea between the compass and the ship, hotkey V
+                // ours (pref `sell_all`): a button on the open sea below the ship (drawn in
+                // `Game::draw`), hotkey V
                 if assets.prefs.borrow().sell_all {
-                    let label = super::t(assets.prefs.borrow().tr("Alles verkaufen (V)", "Sell all (V)"));
-                    d.hots.push(Hot { label, pos: (235, 372), rect: [230, 366, 190, 30], act: Game::sell_all_ask(assets) });
+                    d.hots.push(Hot { label: vec![], pos: SELL_ALL_AT, rect: [SELL_ALL_AT.0, SELL_ALL_AT.1, 120, 24], act: Game::sell_all_ask(assets) });
                 }
                 // owner flags (rules-30 §1): ICONP6 in the owner's colour at the city's P3; a 40x20 item created before
                 // the towns, so it wins the hover where they overlap and lights nothing (rules-63 §1)

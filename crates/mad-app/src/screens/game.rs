@@ -5620,6 +5620,9 @@ impl Screen for Game {
 
     fn draw(&self, frame: &mut Frame, assets: &Assets, mouse: (i32, i32)) -> Option<Cursor> {
         let c = self.draw_screen(frame, assets, mouse);
+        if self.room == Some(Room::Handel) && self.branch.is_none() && self.popups.is_empty() && assets.prefs.borrow().sell_all {
+            tips::draw_label(frame, assets, assets.prefs.borrow().tr("Verkaufen (V)", "Sell all (V)"), rooms::SELL_ALL_AT);
+        }
         if let Some(tip) = self.tooltip(assets, mouse) {
             tips::draw_tip(frame, assets, &tip, mouse);
         }
@@ -6154,6 +6157,8 @@ pub(crate) mod tests {
         let root = std::env::var("MAD_DATA").ok()?;
         let mut a = Assets::load(root.into(), None, None).unwrap();
         a.user_saves = std::env::temp_dir().join(format!("mad-app-game-{}-{:?}", std::process::id(), std::thread::current().id()));
+        // the defaults, not the user's prefs.txt
+        a.prefs = std::cell::RefCell::new(crate::prefs::Prefs::default());
         Some(a)
     }
 
