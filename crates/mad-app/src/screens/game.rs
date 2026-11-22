@@ -642,6 +642,7 @@ enum Pref {
     OfficeInfo,
     SkipTrial,
     SkipLot,
+    ContestNames,
 }
 
 #[derive(Clone, Debug)]
@@ -3539,7 +3540,7 @@ impl Game {
                 if *first {
                     out.push(plain(&subst(&subst(&assets.text(0xA7D49), b"%s", &t(self.loc(*city))), b"%1N1", &t(&self.pref(*judge, 1, 1)))));
                 }
-                let superl = assets.name_table((0xB5D58, 10)).get(*good as usize).cloned().unwrap_or_default();
+                let superl = Self::superlative(assets, *good);
                 let head = |addr: u32| subst_seq(&assets.text(addr), b"%s", &[t(&superl), t(self.good(*good))]);
                 if winners.is_empty() {
                     out.push(plain(&head(0xA7FC4)));
@@ -4729,6 +4730,7 @@ impl Game {
                             Pref::Confirmations => p.confirmations ^= true,
                             Pref::OfficeInfo => p.office_info ^= true,
                             Pref::SkipTrial => p.skip_trial ^= true,
+                Pref::ContestNames => p.contest_names ^= true,
                             Pref::SkipLot => p.skip_lot ^= true,
                         }
                         self.st.house = p.house();
@@ -4882,6 +4884,17 @@ impl Game {
     /// The election screen ends on the human's vote prompt the sim waits for (an answered vote is followed by its coin).
     fn live_vote(&self, el: &Elect) -> bool {
         matches!(self.pending.as_ref().map(|p| &p.ask), Some(Ask::Vote { .. })) && el.steps.last().is_some_and(|s| s.ask)
+    }
+
+    /// The contest discipline's superlative (0xB5D58, 10 entries; rules-13 §3.1: goods 10..14 get none in the
+    /// original). Ours (`prefs.contest_names`): names for those five.
+    fn superlative(assets: &Assets, good: u8) -> String {
+        const OURS: [&str; 5] = ["Das reinste", "Das feinste", "Das edelste", "Der schärfste", "Die besten"];
+        match assets.name_table((0xB5D58, 10)).get(good as usize) {
+            Some(s) => s.clone(),
+            None if assets.prefs.borrow().contest_names => OURS.get((good as usize).wrapping_sub(10)).map_or("", |s| s).to_string(),
+            None => String::new(),
+        }
     }
 
     /// Ours: a one-line gold hint at the bottom of a full-screen scene.
@@ -7173,6 +7186,10 @@ pub(crate) mod tests {
         let Some(Popup::Choice { acts, .. }) = g.popups.back() else { panic!("no dialog") };
         assert_eq!(acts.len(), 6);
         shot(&g, &assets, "contest_entry");
+        // goods 10..14 have no superlative in the original; ours names them with `contest_names`
+        assert_eq!((Game::superlative(&assets, 1), Game::superlative(&assets, 11)), ("Der größte".to_string(), String::new()));
+        assets.prefs.borrow_mut().contest_names = true;
+        assert_eq!(Game::superlative(&assets, 11), "Das feinste");
         g.step(&assets, Field::Mask, 1 << 2);
         g.step(&assets, Field::Mask, 1 << 4);
         g.step(&assets, Field::Mask, 1 << 2);

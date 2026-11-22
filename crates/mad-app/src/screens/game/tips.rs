@@ -79,6 +79,7 @@ fn pref_tip(k: Pref) -> (&'static str, &'static str) {
         Pref::Confirmations => ("Sicherheitsfragen\nFragt vor Bestechung, Erpressung, Spionen\nund anderem, das nicht zurückgeht.", "Confirmations\nAsks before bribes, blackmail, spies\nand other things that can't be undone."),
         Pref::OfficeInfo => ("Amtsinfo\nIm Ämterbaum: wer ein Amt vergibt, die\nBewerber und wie die Wahl steht.", "Office info\nIn the office tree: who appoints, the\napplicants and how the vote stands."),
         Pref::DebtMercy => ("Gnade bei Schulden (Hausregel)\nSchulden nehmen nie die letzte\nNiederlassung, es urteilen die Gläubiger.", "Debt mercy (house rule)\nDebt never takes your last branch,\nthe creditors judge instead."),
+        Pref::ContestNames => ("Wettbewerbsnamen\nZeitungswettbewerb: Namen für Salz, Tuch,\nSilber, Pfeffer und Waffen (im Original leer).", "Contest names\nNewspaper contest: names for Salz, Tuch,\nSilber, Pfeffer and Waffen (blank originally)."),
         Pref::MoreWorkers => ("Bis 255 Arbeiter (Hausregel)\nProduktionsaufträge mit bis zu 255\nArbeitern statt 40.", "Up to 255 workers (house rule)\nProduction orders with up to 255\nworkers instead of 40."),
     }
 }

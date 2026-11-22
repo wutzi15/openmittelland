@@ -56,6 +56,7 @@ OpenMittelland adds optional features the original does not have. All are off by
 | | Sicherheitsfragen | | ask before actions that can't be taken back |
 | | Gnade bei Schulden | | house rule: debt never takes your last branch |
 | | Bis 255 Arbeiter | | house rule: up to 255 workers per production order |
+| | Wettbewerbsnamen | | names for the newspaper contest's unnamed disciplines |
 
 The keys work in the Kontor (some also on the Handel map or the branch screen) and only while their option is on.
 
@@ -77,7 +78,7 @@ The keys work in the Kontor (some also on the Handel map or the branch screen) a
 - **Schuldenwarnung.** At the start of your turn a "Warnung" window appears if your debts will trigger a seizure at the year end (and says so when only one branch is left, which can then be lost), if a loan falls due next year, or if your confirmed orders cost more than your cash.
 - **Produktionshilfe.** On the branch screen press `H` or click "Hilfe (H)". For the branch's first production order it shows: the best ratio of workers to means for that good (for example Korn 5:1, Fisch 3:1), how many means your workers can use, the expected yield at average weather times the local price, the cost and the profit. Each year a limit between 30 and 39 is drawn; every worker above it adds only half as much. Below that, a table lists every good of the city with its ratio, means price and local price.
 - **Bilanz.** `B` in the Kontor. Page one: net worth and cash per year with bars, last ten years. Page two ("Niederlassungen"): per city, the sales of the shipments from that branch minus its wages, means and transport. Not counted per branch: goods sold directly on the branch screen, tolls and director fees. A year appears at the start of the next turn. The accounts are kept while the game runs and start empty after loading.
-- **Preistabelle.** `P` in the Kontor: all 15 goods in all ten cities; the best price of each good is in gold.
+- **Preistabelle.** `P` in the Kontor: all 15 goods in all ten cities; the highest price of each good (best to sell) is in gold, the lowest (best to buy) in red.
 - **Alles verkaufen.** `V` in the Kontor or on the Handel map, or the gold "Verkaufen" on the map's sea. After a Ja/Nein question it sells the whole stock of every branch at local prices, exactly as if you clicked the empty-warehouse icon in each branch, and shows what was sold where.
 - **Chronik.** `L` in the Kontor: the text of every report window of this session (turn ends, year ends, fate), newest first, page by page. It starts empty after loading.
 - **Aufträge kopieren.** On a branch screen `C` copies its four order slots, `E` pastes them into the branch you are looking at. The game checks each order at the new place; an order that is impossible there shows as impossible. Confirmed orders already carry over to the next year by themselves.
@@ -90,6 +91,7 @@ These change the game. A save played with them can behave differently when loade
 
 - **Gnade bei Schulden.** When debt reaches the last stage, the original rolls between a court case and seizing your last branch, which ends the game. With this on it is always the court case. The dice are still rolled, so the rest of the game stays the same.
 - **Bis 255 Arbeiter.** Production orders take up to 255 workers instead of 40. Workers above the yearly limit of 30 to 39 add half as much each, so large crews pay off less per worker.
+- **Wettbewerbsnamen.** The newspaper contest names its disciplines from a table that stops after Glas, so Salz, Tuch, Silber, Pfeffer and Waffen show up nameless ("„ Tuch“"; the original prints garbage there). With this on they read "Das reinste Salz", "Das feinste Tuch", "Das edelste Silber", "Der schärfste Pfeffer" and "Die besten Waffen", in the entry window and in the results.
 
 Command-line options:
 

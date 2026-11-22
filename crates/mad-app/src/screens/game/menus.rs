@@ -506,6 +506,7 @@ impl Game {
                         (tr("Amtsinfo:", "Office info:"), on(p.office_info), OfficeInfo),
                         (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
                         (tr("Bis 255 Arbeiter:", "Up to 255 workers:"), on(p.more_workers), MoreWorkers),
+                        (tr("Wettbewerbsnamen:", "Contest names:"), on(p.contest_names), ContestNames),
                     ]
                 };
                 f.raw(b"$Z$C^ Extras _$Z");
@@ -649,7 +650,7 @@ impl Game {
                 return;
             }
             Menu::Prices => {
-                // ours (`prefs.price_table`): every good in every city; the best price of a good in gold
+                // ours (`prefs.price_table`): every good in every city; the highest price of a good in gold, the lowest in red
                 let pr = assets.prefs.borrow().clone();
                 f.raw(b"$Z$C^ ").txt(pr.tr("Preise", "Prices")).raw(b" _$Z$L");
                 let col = |k: usize| format!("$E$|${}]$R", 470 - 50 * k);
@@ -659,12 +660,15 @@ impl Game {
                 f.raw(b"$E$|$N");
                 for g in 0..GOODS {
                     let best = (0..CITIES).map(|c| self.st.cities[c].price(g)).max().unwrap_or(0);
+                    let low = (0..CITIES).map(|c| self.st.cities[c].price(g)).min().unwrap_or(0);
                     f.raw(b"$L$|").txt(self.good(g as u8));
                     for (c, city) in self.st.cities.iter().enumerate() {
                         let p = city.price(g);
                         f.raw(col(c).as_bytes());
                         if p == best {
                             f.raw(b"$g").txt(&p.to_string()).raw(b"$t");
+                        } else if p == low {
+                            f.raw(b"$h").txt(&p.to_string()).raw(b"$h");
                         } else {
                             f.txt(&p.to_string());
                         }
@@ -2302,10 +2306,9 @@ impl Game {
                 f.raw(&head).raw(&super::subst(&assets.text(0x9A2B4), b"%1N1", &t(&self.pref(person, 1, 1))));
                 // the lines are 0x9A2EA "%a>%s %s<" (superlative, good; empty past the 10-entry table) and 0x9A2F6
                 // "%aFertig": gem bullets, a chosen discipline's gem lit (multi-select, rules-13 §3.1; playtest report)
-                let superl = assets.name_table((0xB5D58, 10));
                 let label = |src: Vec<u8>| src.windows(2).position(|w| w == b"%a").map_or(src.clone(), |i| src[i + 2..].to_vec()).strip_suffix(b"$|").map(<[u8]>::to_vec).unwrap_or_default();
                 for (d, &g) in goods.iter().enumerate() {
-                    let line = super::subst_seq(&assets.text(0x9A2EA), b"%s", &[t(superl.get(g as usize).map_or("", String::as_str)), t(self.good(g))]);
+                    let line = super::subst_seq(&assets.text(0x9A2EA), b"%s", &[t(&Self::superlative(assets, g)), t(self.good(g))]);
                     f.item_bullet_raw(&label(line), Action::Step(Field::Mask, 1 << d)).raw(b"$N");
                 }
                 f.item_bullet_raw(&label(assets.text(0x9A2F6)), Action::Answer(self.amount & 31));

@@ -56,6 +56,8 @@ pub struct Prefs {
     pub skip_trial: bool,
     /// Auction: Tab resolves the current lot without you, at once (the computers bid as if you kept silent).
     pub skip_lot: bool,
+    /// Newspaper contest: names for the disciplines Salz..Waffen, which the original's table leaves without one.
+    pub contest_names: bool,
 }
 
 impl Default for Prefs {
@@ -84,6 +86,7 @@ impl Default for Prefs {
             office_info: false,
             skip_trial: false,
             skip_lot: false,
+            contest_names: false,
         }
     }
 }
@@ -119,6 +122,7 @@ impl Prefs {
                 "office_info" => p.office_info = b,
                 "skip_trial" => p.skip_trial = b,
                 "skip_lot" => p.skip_lot = b,
+                "contest_names" => p.contest_names = b,
                 _ => {}
             }
         }
@@ -128,7 +132,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\noffice_info={}\nskip_trial={}\nskip_lot={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\noffice_info={}\nskip_trial={}\nskip_lot={}\ncontest_names={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -152,6 +156,7 @@ impl Prefs {
             b(self.office_info),
             b(self.skip_trial),
             b(self.skip_lot),
+            b(self.contest_names),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -175,7 +180,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, office_info: true, skip_trial: true, skip_lot: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, office_info: true, skip_trial: true, skip_lot: true, contest_names: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();
