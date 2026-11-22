@@ -99,6 +99,8 @@ pub struct PlayerSetup {
     notice: Option<Vec<u8>>,
     /// "Neuer Spieler" in a running game: the state to return to (Escape) and the humans already in it
     joining: Option<(mad_sim::State, usize)>,
+    /// the seed the world was built with (shown in the Extras window)
+    seed: u32,
 }
 
 /// The page of one step: markup, choice texts and roles, and where the colour row is (if shown).
@@ -142,14 +144,15 @@ pub fn clock_seed() -> u32 {
 }
 
 impl PlayerSetup {
-    pub fn new(difficulty: u8, count: usize) -> Self {
-        Self { difficulty, count, done: vec![], cur: Player::default(), step: Step::Name, world: mad_sim::State::begin_game(clock_seed(), difficulty), city: None, code: vec![], notice: None, joining: None }
+    /// `seed`: the clock seed, or the player's game number (menu.rs `SeedPick`).
+    pub fn new(difficulty: u8, count: usize, seed: u32) -> Self {
+        Self { difficulty, count, done: vec![], cur: Player::default(), step: Step::Name, world: mad_sim::State::begin_game(seed, difficulty), city: None, code: vec![], notice: None, joining: None, seed }
     }
 
     /// One more human in a running game (rules-11 §1); the caller has checked that a city is free.
     pub fn join(st: mad_sim::State) -> Self {
         let n = st.humans().count();
-        Self { difficulty: st.globals.b(mad_sim::state::ga::DIFFICULTY), count: 1, done: vec![], cur: Player::default(), step: Step::Name, world: st.clone(), city: None, code: vec![], notice: None, joining: Some((st, n)) }
+        Self { difficulty: st.globals.b(mad_sim::state::ga::DIFFICULTY), count: 1, done: vec![], cur: Player::default(), step: Step::Name, world: st.clone(), city: None, code: vec![], notice: None, joining: Some((st, n)), seed: 0 }
     }
 
     fn page(&self, assets: &Assets) -> Page {
@@ -358,7 +361,9 @@ impl Screen for PlayerSetup {
                             }
                             if self.done.len() == self.count {
                                 self.world.finish_game_setup(self.count);
-                                return Next::Go(Box::new(Game::start(ctx.assets, self.world.clone())));
+                                let mut g = Game::start(ctx.assets, self.world.clone());
+                                g.seed = Some(self.seed);
+                                return Next::Go(Box::new(g));
                             }
                         }
                         (Role::No, Step::Confirm) => {

@@ -444,8 +444,12 @@ impl Game {
                     let value = [&[crate::text::PAD_MARK, slot][..], &t(if self.opts & bit != 0 { "Ein" } else { "Aus" })].concat();
                     f.bullet(&t(label), tog.clone()).raw(b"$E$R").item(value, tog).raw(b"$N$|");
                 }
-                // ours: the modern options
+                // ours: the modern options, and the undo of the last turn end while one is kept (also key `u` in the Kontor)
                 f.raw(b"$C").item(t("Extras..."), Action::Open(Menu::Extras)).raw(b"$N");
+                if self.undo.is_some() {
+                    let p = assets.prefs.borrow();
+                    f.raw(b"$C").item(t(p.tr("Rückgängig: letzte Runde zurück", "Undo the last turn")), Action::Undo).raw(b"$N");
+                }
                 self.popups.push_back(f.popup_at([100, 60, 440, 360]).with_menu(m));
                 return;
             }
@@ -454,7 +458,7 @@ impl Game {
                 let p = assets.prefs.borrow().clone();
                 let tr = |de: &'static str, en: &'static str| p.tr(de, en).to_string();
                 let on = |v: bool| if v { tr("Ein", "On") } else { tr("Aus", "Off") };
-                let rows: [(String, String, super::Pref); 11] = [
+                let rows: [(String, String, super::Pref); 12] = [
                     (tr("Vollbild:", "Fullscreen:"), on(p.fullscreen), Fullscreen),
                     (tr("Ganzzahlig skalieren:", "Integer scaling:"), on(p.integer_scale), IntegerScale),
                     (tr("Tempo:", "Speed:"), format!("{}x", p.speed), Speed),
@@ -466,6 +470,7 @@ impl Game {
                     (tr("Produktionshilfe:", "Production help:"), on(p.production_help), ProductionHelp),
                     (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
                     (tr("Bis 99 Arbeiter:", "Up to 99 workers:"), on(p.more_workers), MoreWorkers),
+                    (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
                 ];
                 f.raw(b"$Z$C^ Extras _$Z");
                 let slot = 1 + 6 * assets.font.advance[b'M' as usize];
@@ -473,6 +478,9 @@ impl Game {
                     let tog = Action::Opt(super::Opt::Pref(k), m);
                     let value = [&[crate::text::PAD_MARK, slot][..], &t(&value)].concat();
                     f.bullet(&t(&label), tog.clone()).raw(b"$E$R").item(value, tog).raw(b"$N$|");
+                }
+                if let Some(seed) = self.seed {
+                    f.raw(b"$C").txt(&format!("{} {seed}", tr("Spielnummer", "Game number"))).raw(b"$N");
                 }
                 self.popups.push_back(f.popup_at([80, 40, 480, 400]).with_menu(m));
                 return;

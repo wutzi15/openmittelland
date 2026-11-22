@@ -141,9 +141,90 @@ pub fn missions(assets: &Assets) -> Box<dyn Screen> {
 pub fn player_count(assets: &Assets, difficulty: u8) -> Box<dyn Screen> {
     let items = (1..=6).map(|n: u8| vec![b'0' + n]).collect();
     Box::new(Dialog::new(assets.text(addr::NEW_TITLE), MENU_BOX, assets.text(addr::PLAYER_COUNT), items, move |k, ctx| match k {
-        Some(n) => Next::Go(Box::new(PlayerSetup::new(difficulty, n + 1))),
+        // ours: with the Extras option the game number is asked first
+        Some(n) if ctx.assets.prefs.borrow().seed_choice => Next::Go(Box::new(SeedPick { difficulty, count: n + 1, typed: vec![] })),
+        Some(n) => Next::Go(Box::new(PlayerSetup::new(difficulty, n + 1, super::setup::clock_seed()))),
         None => Next::Go(missions(ctx.assets)),
     }))
+}
+
+/// Largest clock seed, seconds 59 · 256 + hundredths 99 (rules-70 §1).
+pub const SEED_MAX: u32 = 59 * 256 + 99;
+
+/// Ours, "Tagesspiel": one game number per calendar day, the days since 1970 spread over the 6000 clock values.
+pub fn daily_seed() -> u32 {
+    let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86400) as u32;
+    let v = days % 6000;
+    v / 100 * 256 + v % 100
+}
+
+fn cp(s: &str) -> Vec<u8> {
+    s.chars().filter_map(crate::input::cp437).collect()
+}
+
+/// Ours (Extras "Spielnummer wählen"): the game number before the player setup. Random is the original's clock
+/// seed, the daily game is `daily_seed`, or a typed number 0..=SEED_MAX replays a game. Empty = random.
+struct SeedPick {
+    difficulty: u8,
+    count: usize,
+    typed: Vec<u8>,
+}
+
+impl SeedPick {
+    fn window(&self, assets: &Assets, lit: &[usize]) -> Window {
+        let p = assets.prefs.borrow();
+        let text = cp(&format!("$Z$C^ {} _$Z$C%m$N%m$N%m$N", p.tr("Spielnummer", "Game number")));
+        let typed = String::from_utf8_lossy(&self.typed);
+        let items = [cp(p.tr("Zufall", "Random")), cp(p.tr("Tagesspiel", "Daily game")), cp(&format!("{}: {typed}", p.tr("Nummer", "Number")))];
+        Window::new(assets, MENU_BOX, &text, &items.iter().map(Vec::as_slice).collect::<Vec<_>>(), &[], lit)
+    }
+
+    fn typed_seed(&self) -> u32 {
+        String::from_utf8_lossy(&self.typed).parse().map_or_else(|_| super::setup::clock_seed(), |n: u32| n.min(SEED_MAX))
+    }
+
+    fn start(&self, seed: u32) -> Next {
+        Next::Go(Box::new(PlayerSetup::new(self.difficulty, self.count, seed)))
+    }
+}
+
+impl Screen for SeedPick {
+    fn update(&mut self, ctx: &mut Ctx, input: &Input, _: u32) -> Next {
+        for e in &input.events {
+            match *e {
+                Event::Left(x, y) => match self.window(ctx.assets, &[]).item_at((x, y)) {
+                    Some(0) => return self.start(super::setup::clock_seed()),
+                    Some(1) => return self.start(daily_seed()),
+                    Some(_) => return self.start(self.typed_seed()),
+                    None => {}
+                },
+                Event::Key(Key::Enter) => return self.start(self.typed_seed()),
+                Event::Key(Key::Char(c)) if c.is_ascii_digit() && self.typed.len() < 5 => self.typed.push(c),
+                Event::Key(Key::Backspace) => _ = self.typed.pop(),
+                Event::Right(..) | Event::Key(Key::Escape) => return Next::Go(player_count(ctx.assets, self.difficulty)),
+                _ => {}
+            }
+        }
+        Next::Stay
+    }
+
+    fn draw(&self, frame: &mut Frame, assets: &Assets, mouse: (i32, i32)) -> Option<Cursor> {
+        backdrop(frame, assets, &assets.text(addr::NEW_TITLE), &[]);
+        let hover: Vec<usize> = self.window(assets, &[]).item_at(mouse).into_iter().collect();
+        let w = self.window(assets, &hover);
+        w.draw(frame, assets);
+        // text cursor after the typed number, as in the name entry (rules-42 §3)
+        let it = w.item_rect(2);
+        crate::text::draw_caret(frame, &assets.font, it.x + it.w, it.y);
+        Some(Cursor::Arrow)
+    }
+}
+
+/// "Anno <year>, <first human>" of one of this app's saves; `None` if it does not parse.
+fn save_label(path: &std::path::Path) -> Option<Vec<u8>> {
+    let st = std::fs::read(path).ok().and_then(|d| mad_sim::State::from_game_dat(&d, 1).ok())?;
+    let who = st.humans().next().map(|p| st.name_str(st.persons[p].name() as usize)).unwrap_or_default();
+    Some(cp(&format!("Anno {}, {who}", st.year)))
 }
 
 /// Label for save slot k: this app's save ("Anno <year>, <first human>"), else the original's
@@ -157,9 +238,8 @@ pub fn slot_label(assets: &Assets, k: u8) -> Option<Vec<u8>> {
     {
         return Some(name);
     }
-    if let Ok(st) = std::fs::read(&own).map_err(|e| e.to_string()).and_then(|d| mad_sim::State::from_game_dat(&d, 1)) {
-        let who = st.humans().next().map(|p| st.name_str(st.persons[p].name() as usize)).unwrap_or_default();
-        return Some(format!("Anno {}, {who}", st.year).chars().filter_map(crate::input::cp437).collect());
+    if let Some(l) = save_label(&own) {
+        return Some(l);
     }
     let name: Vec<u8> = assets.config.borrow().as_ref()?.raw[k as usize * 0x30 + 1..].iter().take_while(|&&b| b != 0).copied().collect();
     (k < 5 && name != b"^ Leer _" && assets.save_path(k).is_file()).then_some(name)
@@ -168,30 +248,101 @@ pub fn slot_label(assets: &Assets, k: u8) -> Option<Vec<u8>> {
 /// Load dialog (`formats.md` §9.4): window (20,140) 600×200, five slots `%d.%m`; empty slots do
 /// nothing when clicked.
 const LOAD_BOX: [i32; 4] = [20, 140, 600, 200];
+/// Ours: the history list, taller for its rows.
+const HISTORY_BOX: [i32; 4] = [20, 100, 600, 280];
+const HISTORY_ROWS: usize = 8;
 
 fn load_dialog(assets: &Assets) -> Box<dyn Screen> {
     let labels: Vec<Option<Vec<u8>>> = (0..5).map(|k| slot_label(assets, k)).collect();
     let mut text = b"$Z$C^ Spiel Laden _$Z$C".to_vec();
     (1..=5).for_each(|k| text.extend(format!("{k}.%m$N").bytes()));
-    let usable: Vec<bool> = labels.iter().map(Option::is_some).collect();
-    let items = labels.into_iter().map(|l| l.unwrap_or(b"^ Leer _".to_vec())).collect();
+    let mut usable: Vec<bool> = labels.iter().map(Option::is_some).collect();
+    let mut items: Vec<Vec<u8>> = labels.into_iter().map(|l| l.unwrap_or(b"^ Leer _".to_vec())).collect();
+    // ours: the rolling history, only with its option on and something in it
+    let history = assets.prefs.borrow().autosave_years > 0 && !crate::assets::history_years(&assets.history_dir()).is_empty();
+    if history {
+        text.extend(b"%m$N");
+        items.push(cp(assets.prefs.borrow().tr("Verlauf...", "History...")));
+        usable.push(true);
+    }
     Box::new(Dialog::new(assets.text(addr::TITLE), LOAD_BOX, text, items, move |k, ctx| match k {
+        Some(5) => Next::Go(history_dialog(ctx.assets)),
         Some(k) if usable[k] => Next::Go(load_game(ctx.assets, k as u8, None)),
         Some(_) => Next::Stay,
         None => Next::Go(main_menu_screen(ctx.assets)),
     }))
 }
 
-/// Loads a `GAMEn.DAT` (this app's, else the original's) into the sim and opens the Kontor. The save holds no
-/// RNG state: a load inside a running game keeps `rng`, one from the menu starts at the session's clock seed.
+/// Ours: the newest history saves (`HISTORY/<year>.DAT`), newest first.
+fn history_dialog(assets: &Assets) -> Box<dyn Screen> {
+    let dir = assets.history_dir();
+    let years: Vec<u16> = crate::assets::history_years(&dir).into_iter().take(HISTORY_ROWS).collect();
+    let mut text = cp(&format!("$Z$C^ {} _$Z$C", assets.prefs.borrow().tr("Verlauf", "History")));
+    let items = years.iter().map(|y| {
+        text.extend(b"%m$N");
+        save_label(&dir.join(format!("{y}.DAT"))).unwrap_or_else(|| cp(&format!("Anno {y}")))
+    });
+    let items = items.collect();
+    Box::new(Dialog::new(assets.text(addr::TITLE), HISTORY_BOX, text, items, move |k, ctx| match k {
+        Some(k) => Next::Go(load_path(ctx.assets, &dir.join(format!("{}.DAT", years[k])), None)),
+        None => Next::Go(load_dialog(ctx.assets)),
+    }))
+}
+
+/// Loads a `GAMEn.DAT` (this app's, else the original's) into the sim and opens the Kontor.
 pub fn load_game(assets: &Assets, slot: u8, rng: Option<mad_sim::rng::Rng>) -> Box<dyn Screen> {
-    let path = assets.save_path(slot);
-    let st = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|d| mad_sim::State::from_game_dat(&d, 1));
+    load_path(assets, &assets.save_path(slot), rng)
+}
+
+/// Loads a save in the GAMEn.DAT format. The save holds no RNG state: a load inside a running game keeps `rng`,
+/// one from the menu starts at the session's clock seed.
+fn load_path(assets: &Assets, path: &std::path::Path, rng: Option<mad_sim::rng::Rng>) -> Box<dyn Screen> {
+    let st = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| mad_sim::State::from_game_dat(&d, 1));
     match st {
         Ok(mut st) => {
             st.rng = rng.unwrap_or_else(|| mad_sim::rng::Rng::new(super::setup::clock_seed()));
             Box::new(Game::start(assets, st))
         }
         Err(e) => Box::new(Placeholder::new(&format!("{}: {e}", path.display()))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeds() {
+        let d = daily_seed();
+        assert!(d <= SEED_MAX && d % 256 < 100);
+        let pick = SeedPick { difficulty: 3, count: 1, typed: b"99999".to_vec() };
+        assert_eq!(pick.typed_seed(), SEED_MAX);
+        assert_eq!(SeedPick { typed: b"42".to_vec(), ..pick }.typed_seed(), 42);
+    }
+
+    /// Ours: the history list shows the newest saves first; screenshots of it and the game-number screen with MAD_SHOT_DIR.
+    #[test]
+    fn real_history_dialog() {
+        let Some(assets) = crate::screens::game::tests::test_assets() else { return };
+        let st = mad_sim::State::new_game(4, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap();
+        for y in 1601..1612 {
+            let mut st = st.clone();
+            st.year = y;
+            assets.write_history(y, &st.to_game_dat(), 20).unwrap();
+        }
+        let dlg = history_dialog(&assets);
+        let shot = |s: &dyn Screen, name: &str| {
+            if let Ok(dir) = std::env::var("MAD_SHOT_DIR") {
+                let mut frame = crate::gfx::Frame::new(assets.palette);
+                s.draw(&mut frame, &assets, (300, 300));
+                crate::gfx::write_screenshot(&format!("{dir}/{name}.png"), &frame).unwrap();
+            }
+        };
+        shot(dlg.as_ref(), "history");
+        shot(&SeedPick { difficulty: 3, count: 1, typed: b"12".to_vec() }, "seed");
+        let years = crate::assets::history_years(&assets.history_dir());
+        assert_eq!(years[0], 1611);
+        assert!(save_label(&assets.history_dir().join("1611.DAT")).unwrap().starts_with(b"Anno 1611"));
+        std::fs::remove_dir_all(&assets.user_saves).unwrap();
     }
 }

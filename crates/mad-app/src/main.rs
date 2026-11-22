@@ -118,7 +118,7 @@ fn first_screen(start: &str, ctx: &mut Ctx) -> Box<dyn Screen> {
     match start {
         "menu" => screens::menu::main_menu(ctx),
         "missions" => screens::menu::missions(ctx.assets),
-        "players" => Box::new(screens::setup::PlayerSetup::new(3, 2)),
+        "players" => Box::new(screens::setup::PlayerSetup::new(3, 2, screens::setup::clock_seed())),
         _ => screens::menu::intro(ctx.assets),
     }
 }

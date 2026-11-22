@@ -34,6 +34,8 @@ pub struct Prefs {
     pub debt_mercy: bool,
     /// House rule: production orders up to 99 workers instead of 40.
     pub more_workers: bool,
+    /// New game: ask for the game number (fixed seed, daily game) before the player setup.
+    pub seed_choice: bool,
 }
 
 impl Default for Prefs {
@@ -51,6 +53,7 @@ impl Default for Prefs {
             production_help: false,
             debt_mercy: false,
             more_workers: false,
+            seed_choice: false,
         }
     }
 }
@@ -75,6 +78,7 @@ impl Prefs {
                 "production_help" => p.production_help = b,
                 "debt_mercy" => p.debt_mercy = b,
                 "more_workers" => p.more_workers = b,
+                "seed_choice" => p.seed_choice = b,
                 _ => {}
             }
         }
@@ -84,7 +88,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -97,6 +101,7 @@ impl Prefs {
             b(self.production_help),
             b(self.debt_mercy),
             b(self.more_workers),
+            b(self.seed_choice),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -120,7 +125,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, debt_mercy: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, debt_mercy: true, seed_choice: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();

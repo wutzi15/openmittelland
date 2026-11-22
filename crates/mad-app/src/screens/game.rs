@@ -620,12 +620,15 @@ enum Pref {
     ProductionHelp,
     DebtMercy,
     MoreWorkers,
+    SeedChoice,
 }
 
 #[derive(Clone, Debug)]
 enum Action {
     Close,
     EndTurn,
+    /// Ours ("Rückgängig"): back to the state before the last turn end.
+    Undo,
     /// "Neuer Spieler" (Spieloptionen): the player creation on the running game.
     NewPlayer,
     Quit,
@@ -979,6 +982,10 @@ impl Popup {
 
 pub struct Game {
     st: State,
+    /// Ours: the state before the human's last turn end, kept with the Rückgängig option for one undo.
+    undo: Option<Box<State>>,
+    /// Ours: the game number this game was started with (not in the save, so unknown after a load).
+    pub(super) seed: Option<u32>,
     tables: Tables,
     branch: Option<usize>,
     room: Option<Room>,
@@ -1236,6 +1243,8 @@ impl Game {
         st.house = assets.prefs.borrow().house();
         let mut g = Self {
             st,
+            undo: None,
+            seed: None,
             tables,
             branch: None,
             room: None,
@@ -1546,6 +1555,17 @@ impl Game {
                 eprintln!("autosave: {e}");
             }
             self.store_config(assets);
+            // ours: the rolling history every n years (Extras), under HISTORY/<year>.DAT
+            let (every, keep) = {
+                let p = assets.prefs.borrow();
+                (p.autosave_years as u16, p.history as usize)
+            };
+            if every > 0
+                && self.st.year.is_multiple_of(every)
+                && let Err(e) = assets.write_history(self.st.year, &self.st.to_game_dat(), keep)
+            {
+                eprintln!("history: {e}");
+            }
         }
         let mut chronicle = None;
         // Chronicle (rules-06 §7): with the option on, the year's entry for 1600..1699 (100 EXE
@@ -4096,7 +4116,13 @@ impl Game {
             Action::Close | Action::Nothing => {}
             Action::EndTurn => {
                 (self.branch, self.room) = (None, None);
+                self.undo = ctx.assets.prefs.borrow().undo.then(|| Box::new(self.st.clone()));
                 self.sim(ctx.assets, Command::EndTurn);
+            }
+            Action::Undo => {
+                if let Some(g) = self.undo_game(ctx.assets) {
+                    return Next::Go(Box::new(g));
+                }
             }
             // Spiel beenden (0x4D880, rules-38 §6): the game goes to slot 5 [UNVERIFIED: whether the options screen asks
             // for the save], then the credits, then the program ends
@@ -4359,6 +4385,7 @@ impl Game {
                             Pref::ProductionHelp => p.production_help ^= true,
                             Pref::DebtMercy => p.debt_mercy ^= true,
                             Pref::MoreWorkers => p.more_workers ^= true,
+                            Pref::SeedChoice => p.seed_choice ^= true,
                         }
                         self.st.house = p.house();
                         if let Err(e) = p.save(&ctx.assets.user_saves) {
@@ -4417,6 +4444,14 @@ impl Game {
             }
         }
         Next::Stay
+    }
+
+    /// Ours: the game as it was before the last turn end (like a load of that moment), once.
+    fn undo_game(&mut self, assets: &Assets) -> Option<Game> {
+        let st = *self.undo.take()?;
+        let mut g = Game::start(assets, st);
+        g.seed = self.seed;
+        Some(g)
     }
 
     fn info(&mut self, assets: &Assets, s: &str) {
@@ -4546,6 +4581,8 @@ impl Game {
                     return n;
                 }
             }
+            // ours: `u` in the Kontor takes the last turn end back (Rückgängig option)
+            (Event::Key(Key::Char(b'u' | b'U')), None) if self.room.is_none() && self.undo.is_some() => return self.act(Action::Undo, ctx),
             // Right click in the Kontor ends the round (spec 01), confirmed per config (§9.2).
             (Event::Right(..), None) if self.me().is_some() => match self.end_turn_dialog(ctx.assets) {
                 Some(p) => self.popups.push_back(p),
@@ -5870,7 +5907,40 @@ pub(crate) mod tests {
         assert!(g.banner_text(b"Kontor").windows(4).any(|w| w == b"1601"));
         let auto = assets.user_saves.join("GAME5.DAT");
         assert_eq!(State::from_game_dat(&std::fs::read(&auto).unwrap(), 1).unwrap().year, 1601);
+        // ours: no history without the option; with it, the year lands in HISTORY/<year>.DAT
+        assert!(crate::assets::history_years(&assets.history_dir()).is_empty());
+        assets.prefs.borrow_mut().autosave_years = 5;
+        g.report(&assets, vec![SimEvent::YearEnd { year: 1600 }], vec![]);
+        assert!(crate::assets::history_years(&assets.history_dir()).is_empty());
+        g.st.year = 1605;
+        g.report(&assets, vec![SimEvent::YearEnd { year: 1604 }], vec![]);
+        assert_eq!(crate::assets::history_years(&assets.history_dir()), [1605]);
+        assert_eq!(State::from_game_dat(&std::fs::read(assets.history_dir().join("1605.DAT")).unwrap(), 1).unwrap().year, 1605);
         std::fs::remove_dir_all(&assets.user_saves).unwrap();
+    }
+
+    /// Ours: with the Rückgängig option the turn end can be taken back once; off, nothing is kept.
+    #[test]
+    fn real_undo_restores_turn() {
+        let Some(assets) = test_assets() else { return };
+        let ps: Vec<_> = [3, 5].map(mad_sim::world::HumanSetup::test).into_iter().collect();
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let mut g = Game::start(&assets, State::new_game(7, 3, &ps).unwrap());
+        g.seed = Some(7);
+        g.act(Action::EndTurn, &mut ctx);
+        assert!(g.undo.is_none() && g.undo_game(&assets).is_none());
+        assets.prefs.borrow_mut().undo = true;
+        let before = g.st.clone();
+        g.act(Action::EndTurn, &mut ctx);
+        assert_ne!(g.st.current, before.current);
+        g.popups.clear();
+        g.open(&assets, Menu::Options);
+        shot(&g, &assets, "options_undo");
+        let back = g.undo_game(&assets).unwrap();
+        assert_eq!((back.st.current, back.st.year, back.seed), (before.current, before.year, Some(7)));
+        assert!(g.undo.is_none());
+        std::fs::remove_dir_all(&assets.user_saves).ok();
     }
 
     /// rules-55 §10: at a turn start the certificate charter follows the Erträge window.
@@ -7153,6 +7223,7 @@ pub(crate) mod tests {
         let Some(assets) = test_assets() else { return };
         let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
         g.popups.clear();
+        g.seed = Some(1234);
         g.open(&assets, Menu::Extras);
         shot(&g, &assets, "extras");
         assert!(g.st.house == mad_sim::state::House::default());

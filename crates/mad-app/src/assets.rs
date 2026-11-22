@@ -209,6 +209,19 @@ impl Assets {
         self.write_user(&format!("GAME{slot}.DAT"), data)
     }
 
+    /// Ours: the rolling history, `HISTORY/<year>.DAT` under [`Self::user_saves`] in the GAMEn.DAT format; only the
+    /// newest `keep` files stay.
+    pub fn write_history(&self, year: u16, data: &[u8], keep: usize) -> std::io::Result<PathBuf> {
+        std::fs::create_dir_all(self.history_dir())?;
+        let p = self.write_user(&format!("HISTORY/{year}.DAT"), data)?;
+        prune_history(&self.history_dir(), keep);
+        Ok(p)
+    }
+
+    pub fn history_dir(&self) -> PathBuf {
+        self.user_saves.join("HISTORY")
+    }
+
     /// Patches the loaded config image and writes it to [`Self::user_saves`] (the original writes the whole
     /// 0x279-byte image back, rules-43 §2). Nothing happens without a loaded config.
     pub fn write_config(&self, patch: impl FnOnce(&mut [u8])) -> std::io::Result<()> {
@@ -239,8 +252,43 @@ impl Assets {
     }
 }
 
+/// The years with a history save in `dir`, newest first.
+pub fn history_years(dir: &std::path::Path) -> Vec<u16> {
+    let mut years: Vec<u16> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".DAT")?.parse().ok())
+        .collect();
+    years.sort_unstable_by(|a, b| b.cmp(a));
+    years
+}
+
+/// Deletes all but the newest `keep` (at least one) history saves.
+fn prune_history(dir: &std::path::Path, keep: usize) {
+    for y in history_years(dir).into_iter().skip(keep.max(1)) {
+        let _ = std::fs::remove_file(dir.join(format!("{y}.DAT")));
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// Our history keeps the newest n saves, listed newest first.
+    #[test]
+    fn history_rotation() {
+        let dir = std::env::temp_dir().join(format!("mad-history-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for y in 1600..1613 {
+            std::fs::write(dir.join(format!("{y}.DAT")), b"x").unwrap();
+        }
+        std::fs::write(dir.join("notes.txt"), b"x").unwrap();
+        super::prune_history(&dir, 10);
+        assert_eq!(super::history_years(&dir), (1603..1613).rev().collect::<Vec<u16>>());
+        super::prune_history(&dir, 0);
+        assert_eq!(super::history_years(&dir), [1612]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Menu strings come from the user's EXE at the addresses in `docs/re/strings.md`.
     #[test]
     fn real_exe_text() {
