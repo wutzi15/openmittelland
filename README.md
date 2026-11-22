@@ -28,6 +28,34 @@ The music plays when the `soundtrack` folder sits where the installed game keeps
 
 Saves and options go to `%APPDATA%\mittelland-ad` (Windows) or `~/.local/share/mittelland-ad` (macOS, Linux), `MAD_SAVE_DIR` overrides it. Saves of the original install are offered for loading too.
 
+### Extras
+
+OpenMittelland adds optional features the original does not have. All are off by default, so a fresh install plays like the original; they live in `prefs.txt` next to the saves and never in `CONFIG.DAT` or the `GAMEn.DAT` saves, which stay readable by the original. Open them with **Tab** or Spieloptionen → Optionen → "Extras...":
+
+| page | option | what it does |
+|---|---|---|
+| Anzeige und Komfort | Vollbild | fullscreen (also F11, Alt+Enter) |
+| | Ganzzahlig skalieren | whole-number scaling with black borders (on by default, as before) |
+| | Tempo | 1x to 4x speed for scrolling, waits and animations |
+| | Sprache | German or English for the Extras' own texts (the game's texts come from your copy) |
+| | Hinweise | tooltips after resting the pointer |
+| | Tasten | keyboard shortcuts, list with `?` |
+| | Autosave alle | history saves every 1, 5 or 10 years ("Verlauf..." in the load dialog) |
+| | Rückgängig | take the last turn end back once (`U`) |
+| | Spielnummer wählen | type a game number or play the daily game |
+| Hilfen und Hausregeln | Schuldenwarnung | warns before debt seizure, due loans, orders the cash can't cover |
+| | Produktionshilfe | best worker:means ratio, means needed, expected yield and profit (`H` on the branch screen) |
+| | Bilanz | net worth, cash and branch results per year (`B`) |
+| | Preistabelle | every good in every city, best price marked (`P`) |
+| | Alles verkaufen | sell every branch's stock at once (`V`) |
+| | Chronik | all report texts of this session (`L`) |
+| | Aufträge kopieren | copy a branch's orders (`C`) and paste them into another (`E`) |
+| | Sicherheitsfragen | asks before bribes, denunciations, blackmail, spies, dismissing troops, selling a castle |
+| | Gnade bei Schulden | house rule: debt never takes your last branch |
+| | Bis 255 Arbeiter | house rule: production orders up to 255 workers (the original: 40) |
+
+The house rules change the game: a save played with them may not behave the same in the original.
+
 Command-line options:
 
 | option | effect |
