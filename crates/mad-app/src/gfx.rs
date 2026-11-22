@@ -51,6 +51,30 @@ impl Frame {
     }
 
 
+    /// Darkens `[x, y, w, h]` to about half (a shadow): exact in hicolor, else to the nearest palette entry.
+    pub fn shade(&mut self, [x, y, w, h]: [i32; 4]) {
+        let dark: Vec<u16> = if self.hicolor {
+            vec![]
+        } else {
+            let half = |c: [u8; 3]| c.map(|v| v / 2);
+            let d = |a: &[u8; 3], b: [u8; 3]| (0..3).map(|i| (a[i] as i32 - b[i] as i32).pow(2)).sum::<i32>();
+            (0..256).map(|i| (0..256).min_by_key(|&j| d(&self.palette[j], half(self.palette[i]))).unwrap_or(0) as u16).collect()
+        };
+        for py in y.max(0)..(y + h).min(H as i32) {
+            for px in x.max(0)..(x + w).min(W as i32) {
+                let v = &mut self.pixels[py as usize * W + px as usize];
+                *v = if self.hicolor { (*v >> 1) & 0x3DEF } else { dark[*v as usize & 255] };
+            }
+        }
+    }
+
+    /// A 1 px rectangle border in the colour nearest `rgb`.
+    pub fn outline_rgb(&mut self, [x, y, w, h]: [i32; 4], rgb: [u8; 3]) {
+        for r in [[x, y, w, 1], [x, y + h - 1, w, 1], [x, y, 1, h], [x + w - 1, y, 1, h]] {
+            self.fill_rgb(r, rgb);
+        }
+    }
+
     /// Draws an 8-bit (palette index) image in either mode: through the palette in hicolor.
     pub fn blit_idx(&mut self, img: &Image, x: i32, y: i32) {
         if !self.hicolor {

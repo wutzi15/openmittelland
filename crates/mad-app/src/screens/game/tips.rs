@@ -2,7 +2,7 @@
 //! after the pointer rested) and keyboard shortcuts (`prefs.shortcuts`: Kontor keys to the places, Space / Enter
 //! end the turn, 1-9 pick a menu line, `?` lists the keys).
 
-use super::{Action, BANNER_RECT, GOLD_RECT, Game, Menu, Opt, Popup, SPOTS, Spot, branch, hit, rooms::Room};
+use super::{Action, BANNER_RECT, GOLD_RECT, Game, Menu, Opt, Popup, Pref, SPOTS, Spot, branch, hit, rooms::Room};
 use crate::{
     assets::Assets,
     gfx::Frame,
@@ -53,6 +53,34 @@ pub(super) fn key_list(p: &Prefs) -> Vec<(String, String)> {
         }
     }
     v
+}
+
+/// What an Extras option does (title line, then at most two lines of about 45 characters).
+fn pref_tip(k: Pref) -> (&'static str, &'static str) {
+    match k {
+        Pref::Fullscreen => ("Vollbild\nAuch mit F11 oder Alt+Enter.", "Fullscreen\nAlso with F11 or Alt+Enter."),
+        Pref::IntegerScale => ("Ganzzahlig skalieren\nScharfe Pixel, dafür schwarze Ränder.\nAus: füllt das Fenster im Format 4:3.", "Integer scaling\nSharp pixels, black borders.\nOff: fills the window at 4:3."),
+        Pref::Speed => ("Tempo 1x bis 4x\nSchnellere Texte, Wartezeiten, Filme\nund Schlachten. Die Musik bleibt gleich.", "Speed 1x to 4x\nFaster texts, waits, films and battles.\nThe music stays the same."),
+        Pref::Lang => ("Sprache\nNur für die Texte der Extras.\nDas Spiel selbst bleibt deutsch.", "Language\nFor the Extras' own texts only.\nThe game itself stays German."),
+        Pref::Tooltips => ("Hinweise\nZeigt nach kurzem Verweilen,\nwas ein Klick bewirkt.", "Tooltips\nAfter a short rest the pointer\nshows what a click does."),
+        Pref::Shortcuts => ("Tasten\nKontor-Tasten zu allen Räumen, Leertaste\nbeendet die Runde. ? zeigt alle Tasten.", "Shortcuts\nKontor keys to every room, Space ends\nthe turn. ? lists all keys."),
+        Pref::Autosave => ("Autosave\nSpeichert alle 1, 5 oder 10 Jahre in den\nVerlauf (Spiel laden, Verlauf...).", "Autosave\nSaves every 1, 5 or 10 years into the\nhistory (Load game, History...)."),
+        Pref::Undo => ("Rückgängig\nTaste U nimmt die letzte Runde einmal\nzurück. Danach wird neu gewürfelt.", "Undo\nKey U takes the last turn back once.\nThe dice are rolled anew."),
+        Pref::SeedChoice => ("Spielnummer wählen\nNeues Spiel: Zufall, Tagesspiel oder eine\nNummer. Gleiche Nummer, gleiche Welt.", "Choose game number\nNew game: random, daily game or a number.\nSame number, same world."),
+        Pref::SkipTrial => ("Szenen überspringen\nLeertaste überspringt Gericht, Begräbnis,\nWahlen und Entlassungen. Gleiches Ergebnis.", "Skip scenes\nSpace skips court, funeral, elections and\ndismissals. The outcome is the same."),
+        Pref::SkipLot => ("Posten überspringen\nTab lässt einen Auktionsposten ohne dich\nlaufen, ohne Wartezeit.", "Skip auction lot\nTab runs an auction lot without you,\nwith no waits."),
+        Pref::Warnings => ("Schuldenwarnung\nWarnt zu Rundenbeginn vor Pfändung,\nfälligen Krediten und Ähnlichem.", "Warnings\nWarns at the turn start of seizure,\nloans due and the like."),
+        Pref::ProductionHelp => ("Produktionshilfe\nTaste H: bestes Verhältnis, nötige Mittel\nund erwarteter Ertrag je Ware.", "Production help\nKey H: best ratio, means needed and\nexpected yield per good."),
+        Pref::Ledger => ("Bilanz\nTaste B: Vermögen, Bargeld und Ergebnis\nder Niederlassungen über die Jahre.", "Ledger\nKey B: net worth, cash and branch\nresults over the years."),
+        Pref::PriceTable => ("Preistabelle\nTaste P: alle Waren in allen Städten.", "Price table\nKey P: every good in every city."),
+        Pref::SellAll => ("Alles verkaufen\nTaste V oder Verkaufen auf der Karte:\nverkauft den Vorrat aller Niederlassungen.", "Sell all\nKey V or Sell all on the map: sells\nevery branch's stock."),
+        Pref::EventLog => ("Chronik\nTaste L: alle Meldungen dieser Sitzung,\ndie neueste zuerst.", "Event log\nKey L: every report of this session,\nnewest first."),
+        Pref::OrderCopy => ("Aufträge kopieren\nTaste C kopiert die Aufträge einer\nNiederlassung, Taste E fügt sie ein.", "Copy orders\nKey C copies a branch's orders,\nkey E pastes them."),
+        Pref::Confirmations => ("Sicherheitsfragen\nFragt vor Bestechung, Erpressung, Spionen\nund anderem, das nicht zurückgeht.", "Confirmations\nAsks before bribes, blackmail, spies\nand other things that can't be undone."),
+        Pref::OfficeInfo => ("Amtsinfo\nIm Ämterbaum: wer ein Amt vergibt, die\nBewerber und wie die Wahl steht.", "Office info\nIn the office tree: who appoints, the\napplicants and how the vote stands."),
+        Pref::DebtMercy => ("Gnade bei Schulden (Hausregel)\nSchulden nehmen nie die letzte\nNiederlassung, es urteilen die Gläubiger.", "Debt mercy (house rule)\nDebt never takes your last branch,\nthe creditors judge instead."),
+        Pref::MoreWorkers => ("Bis 255 Arbeiter (Hausregel)\nProduktionsaufträge mit bis zu 255\nArbeitern statt 40.", "Up to 255 workers (house rule)\nProduction orders with up to 255\nworkers instead of 40."),
+    }
 }
 
 /// Index of the n-th choice that is not a number field.
@@ -169,7 +197,10 @@ impl Game {
             Action::Sim(Command::CastleOffers { .. }, _) => tr("Burg: Angebote und Info", "Castle: offers and info"),
             Action::Step(f, _) if f.is_word() => tr("Obere Hälfte: nächster Eintrag, untere: voriger", "Upper half: next entry, lower: previous"),
             Action::Step(..) => tr("Obere Hälfte erhöht, untere verringert", "Upper half raises, lower half lowers"),
-            Action::Opt(Opt::Pref(_), _) => tr("Extra ein- oder ausschalten", "Toggle the extra"),
+            Action::Opt(Opt::Pref(k), _) => {
+                let (de, en) = pref_tip(*k);
+                tr(de, en)
+            }
             Action::Opt(..) => tr("Einstellung ändern", "Change the setting"),
             Action::ToggleOrder(..) => tr("Auftrag bestätigen oder aufheben", "Confirm or cancel the order"),
             Action::Branch(b) => format!("{} {}", tr("Niederlassung in", "Branch in"), self.loc(self.st.props[*b].loc())),
@@ -364,31 +395,41 @@ impl Game {
     }
 }
 
-/// The label box: one line of dark text on parchment with a 1 px border, below right of the pointer, kept on screen.
+/// The label box below right of the pointer, kept on screen; `\n` starts a new line.
 pub(super) fn draw_tip(frame: &mut Frame, assets: &Assets, tip: &str, mouse: (i32, i32)) {
-    draw_label(frame, assets, tip, (mouse.0 + 14, mouse.1 + 22));
+    let lines: Vec<String> = tip.split('\n').map(str::to_string).collect();
+    draw_lines(frame, assets, &lines, (mouse.0 + 14, mouse.1 + 22));
 }
 
-/// A one-line parchment box with a dark border at `at` (clamped to the screen): tooltips and our map buttons.
-pub(super) fn draw_label(frame: &mut Frame, assets: &Assets, tip: &str, at: (i32, i32)) {
-    draw_lines(frame, assets, &[tip.to_string()], at);
-}
-
-/// Line pitch of the multi-line box: tighter than the game's 24 px rows.
+/// Line pitch of the box: tighter than the game's 24 px rows.
 const TIP_LINE_H: i32 = 20;
+/// Inner margin left/right and top/bottom.
+const TIP_PAD: (i32, i32) = (10, 7);
+/// Gap under a title line, with the rule in it.
+const TIP_RULE: i32 = 6;
 
-/// The parchment box with several lines (the office info), clamped to the screen.
+/// The parchment box: a soft shadow, a dark frame with a gold inner line; with several lines the first is a title
+/// set off by a rule. Clamped to the screen.
 pub(super) fn draw_lines(frame: &mut Frame, assets: &Assets, lines: &[String], at: (i32, i32)) {
-    let laid: Vec<text::Laid> = lines.iter().map(|l| text::layout(&assets.font, &[b"$t$L".as_slice(), &super::t(l)].concat(), &[], &[], 640, &[])).collect();
-    let tw: i32 = laid.iter().map(|l| l.glyphs.iter().map(|g| assets.font.advance[g.2 as usize] as i32).sum::<i32>()).max().unwrap_or(0);
-    let (w, h) = (tw + 12, if lines.len() == 1 { text::LINE_H } else { TIP_LINE_H * lines.len() as i32 + 8 });
-    let x = at.0.min(640 - w).max(0);
-    let y = at.1.min(480 - h).max(0);
-    frame.fill_rgb([x, y, w, h], [64, 40, 16]);
-    frame.fill_rgb([x + 1, y + 1, w - 2, h - 2], [226, 202, 150]);
+    // a title in the game's red highlight
+    let head = |k: usize| if k == 0 && lines.len() > 1 { b"$t$L$h".as_slice() } else { b"$t$L" };
+    let laid: Vec<text::Laid> = lines.iter().enumerate().map(|(k, l)| text::layout(&assets.font, &[head(k), &super::t(l)].concat(), &[], &[], 640, &[])).collect();
+    let tw: i32 = laid.iter().map(|l| l.glyphs.iter().map(|g| assets.font.advance[g.2 as usize] as i32).sum::<i32>()).max().unwrap_or(0) + 4;
+    let rule = if lines.len() > 1 { TIP_RULE } else { 0 };
+    let (w, h) = (tw + 2 * TIP_PAD.0, TIP_LINE_H * lines.len() as i32 + rule + 2 * TIP_PAD.1);
+    let x = at.0.min(640 - w - 4).max(0);
+    let y = at.1.min(480 - h - 4).max(0);
+    frame.shade([x + 4, y + 4, w, h]);
+    frame.fill_rgb([x, y, w, h], [52, 30, 10]);
+    frame.fill_rgb([x + 1, y + 1, w - 2, h - 2], [232, 210, 160]);
+    frame.outline_rgb([x + 3, y + 3, w - 6, h - 6], [176, 132, 52]);
     // the layout starts at the window inset
+    let ty = |k: i32| y + TIP_PAD.1 + 3 - text::INSET + k * TIP_LINE_H + if k > 0 { rule } else { 0 };
     for (k, l) in laid.iter().enumerate() {
-        text::draw(frame, &assets.font, l, x + 6 - text::INSET, y + 4 - text::INSET + k as i32 * TIP_LINE_H);
+        text::draw(frame, &assets.font, l, x + TIP_PAD.0 - text::INSET, ty(k as i32));
+    }
+    if rule > 0 {
+        frame.fill_rgb([x + TIP_PAD.0, y + TIP_PAD.1 + TIP_LINE_H + rule / 2 + 1, w - 2 * TIP_PAD.0, 1], [176, 132, 52]);
     }
 }
 
@@ -448,8 +489,12 @@ mod tests {
         let r = w.item_rect(0);
         let at = (r.x + 2, r.y + 2);
         rest(&mut g, &mut ctx, at, TIP_MS);
-        assert_eq!(g.tooltip(&assets, at).as_deref(), Some("Extra ein- oder ausschalten"));
+        assert_eq!(g.tooltip(&assets, at).as_deref(), Some(pref_tip(Pref::Fullscreen).0));
         shot_at(&g, &assets, "tip_menu", at);
+        let r = w.item_rect(2 * 9);
+        let at = (r.x + 2, r.y + 2);
+        rest(&mut g, &mut ctx, at, TIP_MS);
+        shot_at(&g, &assets, "tip_menu_long", at);
         g.popups.clear();
         // the branch screen: warehouse, a good, a bottom icon
         let h = g.me().unwrap();
