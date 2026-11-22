@@ -371,7 +371,8 @@ pub struct State {
 pub struct House {
     /// Debt stage 5 always goes to the jury instead of rolling for the last branch (rules-02 §10.2).
     pub debt_mercy: bool,
-    /// Largest worker count of a production order (the original: 40).
+    /// Largest worker count of a production order (the original: 40). Above 40 the workers past the yearly cap no
+    /// longer count half (`production_output`).
     pub max_workers: u8,
 }
 

@@ -80,7 +80,7 @@ fn pref_tip(k: Pref) -> (&'static str, &'static str) {
         Pref::OfficeInfo => ("Amtsinfo\nIm Ämterbaum: wer ein Amt vergibt, die\nBewerber und wie die Wahl steht.", "Office info\nIn the office tree: who appoints, the\napplicants and how the vote stands."),
         Pref::DebtMercy => ("Gnade bei Schulden (Hausregel)\nSchulden nehmen nie die letzte\nNiederlassung, es urteilen die Gläubiger.", "Debt mercy (house rule)\nDebt never takes your last branch,\nthe creditors judge instead."),
         Pref::ContestNames => ("Wettbewerbsnamen\nZeitungswettbewerb: Namen für Salz, Tuch,\nSilber, Pfeffer und Waffen (im Original leer).", "Contest names\nNewspaper contest: names for Salz, Tuch,\nSilber, Pfeffer and Waffen (blank originally)."),
-        Pref::MoreWorkers => ("Bis 255 Arbeiter (Hausregel)\nProduktionsaufträge mit bis zu 255\nArbeitern statt 40.", "Up to 255 workers (house rule)\nProduction orders with up to 255\nworkers instead of 40."),
+        Pref::MoreWorkers => ("Bis 255 Arbeiter (Hausregel)\nBis zu 255 Arbeiter statt 40, und jeder\nzählt voll (im Original ab 30..39 nur halb).", "Up to 255 workers (house rule)\nUp to 255 workers instead of 40, each\ncounts fully (originally half above 30..39)."),
     }
 }
 

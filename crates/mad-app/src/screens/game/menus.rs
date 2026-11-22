@@ -613,7 +613,7 @@ impl Game {
                     let worker = |n: i32| if n == 1 { tr("Arbeiter", "worker") } else { tr("Arbeiter", "workers") };
                     f.txt(&format!("{}: {} {rw} {} {} {rm} {}", self.good(g as u8), tr("am besten", "best"), worker(rw), tr("mit", "with"), means(rm))).raw(b"$N");
                     f.txt(&format!("{}: {w} {} {} {opt} {}", tr("Euer Auftrag", "Your order"), worker(w), tr("arbeiten am besten mit", "work best with"), means(opt))).raw(b"$N");
-                    if w > 30 {
+                    if w > 30 && !self.st.uncapped(b) {
                         f.txt(&tr("Über 30 Arbeiter (Grenze 30..39, zufällig) zählt der Rest nur halb.", "Above 30 workers (limit 30..39, random) the rest counts half.")).raw(b"$N");
                     }
                     f.txt(&format!("{}: {} x {}: {} Taler, {}: {}, {}: {}", tr("Erwartet", "Expected"), dotted(out), price, dotted(out * price), tr("Kosten", "cost"), dotted(cost), tr("Gewinn", "profit"), dotted(out * price - cost))).raw(b"$N");

@@ -90,7 +90,7 @@ The keys work in the Kontor (some also on the Handel map or the branch screen) a
 These change the game. A save played with them can behave differently when loaded in the original.
 
 - **Gnade bei Schulden.** When debt reaches the last stage, the original rolls between a court case and seizing your last branch, which ends the game. With this on it is always the court case. The dice are still rolled, so the rest of the game stays the same.
-- **Bis 255 Arbeiter.** Production orders take up to 255 workers instead of 40. Workers above the yearly limit of 30 to 39 add half as much each, so large crews pay off less per worker.
+- **Bis 255 Arbeiter.** Production orders take up to 255 workers instead of 40, and the original's crowding rule is off: there workers above a yearly limit of 30 to 39 add only half as much each; with this option every worker counts fully, so twice the workers make twice the goods (and cost twice the wages).
 - **Wettbewerbsnamen.** The newspaper contest names its disciplines from a table that stops after Glas, so Salz, Tuch, Silber, Pfeffer and Waffen show up nameless ("„ Tuch“"; the original prints garbage there). With this on they read "Das reinste Salz", "Das feinste Tuch", "Das edelste Silber", "Der schärfste Pfeffer" and "Die besten Waffen", in the entry window and in the results.
 
 Command-line options:

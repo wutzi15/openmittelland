@@ -281,7 +281,8 @@ impl State {
             out += MEANS_COST[g] * (m - opt) / (2 * self.cities[c].price(g) as i32);
         }
         let t = 30 + self.ri(10);
-        if w > t {
+        // house rule `max_workers` above 40: no cap, the draw stays so the RNG sequence is the original's
+        if w > t && !self.uncapped(branch) {
             out = out * t / w + out * (w - t) / (2 * w);
         }
         out
@@ -304,10 +305,15 @@ impl State {
         if m > opt {
             out += MEANS_COST[g] * (m - opt) / (2 * self.cities[c].price(g) as i32);
         }
-        if w > 30 {
+        if w > 30 && !self.uncapped(branch) {
             out = (30..40).map(|t| if w > t { out * t / w + out * (w - t) / (2 * w) } else { out }).sum::<i32>() / 10;
         }
         out
+    }
+
+    /// House rule `max_workers` above 40: a human's workers past the yearly cap count fully (computers keep the cap).
+    pub fn uncapped(&self, branch: usize) -> bool {
+        self.house.max_workers > 40 && self.persons[self.props[branch].owner() as usize].human()
     }
 
     /// §3.1 production feasibility.
@@ -716,6 +722,7 @@ mod tests {
         let h = s.current as usize;
         let b = s.branch_at(h, 1).unwrap();
         s.persons[h].set_pay_workers(255);
+        s.house.max_workers = 255;
         for g in 0..GOODS {
             let rng = s.rng;
             let mut last = 0;
@@ -728,6 +735,10 @@ mod tests {
                 assert!((out >= last || !enough) && out < 30000, "g {g} w {w}: {out} after {last}");
                 last = out;
             }
+            // no cap with the house rule: twice the workers, twice the output (up to rounding)
+            s.rng = rng;
+            let (o40, o80) = (s.production_estimate(b, g, 40, means_needed(g, 40)), s.production_estimate(b, g, 80, means_needed(g, 80)));
+            assert!((o80 - 2 * o40).abs() * 200 <= o80, "g {g}: {o40} {o80}");
         }
     }
 
