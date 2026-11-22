@@ -34,6 +34,8 @@ impl State {
                     let v = heap::r32(&self.heap.recs[i], 5) + 1;
                     heap::w32(&mut self.heap.recs[i], 5, v);
                 }
+                // rules-21 §2.2: the question is printed into the owner's turn-end window, after the lines so far
+                ch.show(ev);
                 let choice = ch.ask(&Ask::SiegeWon { city: c as u8 }).min(2);
                 if choice != 1 {
                     self.plunder(b, c);
@@ -50,11 +52,15 @@ impl State {
         } else if !human {
             ev.push(Event::SiegeGoesOn { city: c as u8, besieger: b as u8 });
             self.heap.recs[ri][3] = 2;
-        } else if ch.ask(&Ask::ContinueSiege { city: c as u8, cost: (a * 5) as i32 }) == 0 {
-            self.pay(b, (a * 5) as i32);
-            self.heap.recs[ri][3] = 2;
         } else {
-            self.heap.delete(ri);
+            // printed into the owner's turn-end window, after the lines so far (rules-21 §2.2)
+            ch.show(ev);
+            if ch.ask(&Ask::ContinueSiege { city: c as u8, cost: (a * 5) as i32 }) == 0 {
+                self.pay(b, (a * 5) as i32);
+                self.heap.recs[ri][3] = 2;
+            } else {
+                self.heap.delete(ri);
+            }
         }
     }
 

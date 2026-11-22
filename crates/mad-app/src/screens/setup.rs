@@ -162,8 +162,8 @@ impl PlayerSetup {
         p.args = vec![vec![b'0' + n as u8 + 1], vec![self.cur.hotkey.unwrap_or(b' ').to_ascii_uppercase()]];
         // a player joining a running game gets the plain heading (formats §8.2 step 3, live capture)
         let head = if self.joining.is_some() { b"$|$H$Z$CEin neuer Spieler$Z".to_vec() } else { t(addr::PLAYER_NO) };
-        // while typing, the name is red and left-aligned at x 102 (live capture); afterwards centred
-        let line = if self.step == Step::Name { [b"$L$17>".as_slice(), &replace(&t(addr::ITEM_LINE), b"$C", b"")].concat() } else { t(addr::ITEM_LINE) };
+        // while typing, the name is red and left-aligned at x 105 (live A/B 2026-11-22); afterwards centred
+        let line = if self.step == Step::Name { [b"$L$105[".as_slice(), &replace(&t(addr::ITEM_LINE), b"$C", b"")].concat() } else { t(addr::ITEM_LINE) };
         p.src = [head, t(addr::LEFT_NAME), line].concat();
         p.items.push(self.cur.name.clone());
         p.roles.push(Role::Name);

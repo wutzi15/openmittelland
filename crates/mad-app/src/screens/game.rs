@@ -794,13 +794,14 @@ impl Elect {
         for (i, (name, n)) in self.names.iter().zip(self.coins()).enumerate() {
             let y = 150 + 24 * i as i32;
             // bullet item (style 0x90, glyph 0x73) at x 120, the name at x 150 (rules-15 §3.4 step 2)
-            // at a vote prompt the line under the pointer lights its gem (0x74), as every gem does
-            // the gems show only in an election a human votes in (playtest report: not when he only applies)
-            if self.steps.iter().any(|st| st.ask) {
-                let lit = self.steps.get(self.pos).is_some_and(|st| st.ask) && self.line_at(mouse) == Some(i);
+            // the gems show only while a human elector picks (live A/B 2026-11-22: not before, not after his vote, not
+            // when he only applies); the line under the pointer lights its gem (0x74), as every gem does
+            if self.steps.get(self.pos).is_some_and(|st| st.ask) {
+                let lit = self.line_at(mouse) == Some(i);
                 frame.blit(&assets.icon(if lit { 0x74 } else { 0x73 })[0], 120, y + 3);
             }
-            caption(assets, [150, y - 2, 490, 24], name).draw_text(frame, assets);
+            // the caption box prints 12 px in: the name starts at x 150 (live A/B 2026-11-22: ours was at 162)
+            caption(assets, [138, y - 2, 502, 24], name).draw_text(frame, assets);
             // coins stack right to left in front of the bullet, at most six (step 4)
             for k in 0..n.min(6) as i32 {
                 if let Some(img) = coin.get((ticks as usize / 7 + k as usize) % coin.len().max(1)) {
@@ -987,12 +988,11 @@ impl Popup {
             Popup::Choice { rect, src, items, gems, .. } => {
                 let refs: Vec<&[u8]> = items.iter().map(Vec::as_slice).collect();
                 let w = Window::new(assets, *rect, src, &refs, &[], lit).with_text_dy(if *gems { GEM_DY } else { 0 });
-                // a menu printed into the turn-end report window keeps its scroll frame and is scrolled up by whole
-                // lines until its last line shows (rules-63 §2.3; playtest: the last choice sat under the roll)
+                // a menu printed into the turn-end report window keeps its scroll frame and is scrolled up until its
+                // last line ends at the window bottom, to the pixel (rules-63 §2.3; live A/B 2026-11-22: 94 px)
                 if *rect == REPORT_BOX {
-                    let shown = 12 + 24 * ((rect[3] - 12) / 24);
-                    let over = (w.laid.height - shown).max(0);
-                    w.with_scroll().with_text_dy(GEM_DY - (over + 23) / 24 * 24)
+                    let over = (w.laid.height - rect[3]).max(0);
+                    w.with_scroll().with_text_dy(GEM_DY - over)
                 } else {
                     w
                 }
@@ -1200,7 +1200,7 @@ const REPORT_BOX: [i32; 4] = [30, 110, 520, 290];
 const YEAR_BOX: [i32; 4] = [100, 126, 440, 300];
 
 /// Leads a report line that is markup kept from a menu answered in the window (the gifts, rules-63 §2), one char
-/// per byte; its `%m` items are the gem bullets.
+/// per byte; its `%m` items are the gem bullets. The char after it is the chosen bullet ('0'..) or '-'.
 const RAW: char = '\u{1}';
 
 /// An answered menu's markup with its values filled in: number and word items become their text, bullets stay
@@ -1230,8 +1230,22 @@ fn answered(src: &[u8], items: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
-fn raw_line(src: &[u8]) -> String {
-    std::iter::once(RAW).chain(src.iter().map(|&b| b as char)).collect()
+fn raw_line(src: &[u8], lit: Option<usize>) -> String {
+    let lit = lit.map_or('-', |k| (b'0' + k.min(9) as u8) as char);
+    [RAW, lit].into_iter().chain(src.iter().map(|&b| b as char)).collect()
+}
+
+/// The gem items of `report_window(lines)` that stay lit: the chosen bullet of each answered menu (live A/B 2026-11-22).
+fn report_lit(lines: &[String]) -> Vec<usize> {
+    let (mut lit, mut n) = (vec![], 0);
+    for l in lines.iter().filter_map(|l| l.strip_prefix(RAW)) {
+        let k = l.matches("%m").count();
+        if let Some(c) = l.bytes().next().filter(u8::is_ascii_digit).map(|c| (c - b'0') as usize).filter(|&c| c < k) {
+            lit.push(n + c);
+        }
+        n += k;
+    }
+    lit
 }
 
 /// Ours: the Chronik window's text width and lines per page (rect [40, 30, 560, 420], 24 px lines, the title and
@@ -1267,7 +1281,7 @@ fn report_window(assets: &Assets, lines: &[String]) -> Window {
 
 fn report_src(lines: &[String]) -> Vec<u8> {
     let line = |l: &String| match l.strip_prefix(RAW) {
-        Some(l) => l.chars().map(|c| c as u8).collect(),
+        Some(l) => l.chars().skip(1).map(|c| c as u8).collect(),
         None => [t(l), b"$N".to_vec()].concat(),
     };
     [b"$L".to_vec(), lines.iter().flat_map(line).collect()].concat()
@@ -1835,9 +1849,9 @@ impl Game {
                     let boxes = [vec![([0, 0, 640, 60], [speech(223_907), b"$0T".to_vec(), src].concat())], last.unwrap_or_default()].concat();
                     self.popups.push_back(Popup::Scene { pic: 0xC8, boxes });
                 }
-                // the conquest plays the film (rules-21 §2.2, §2.3), before the conquest text
-                // 12/100 s for a human besieger, 10 for a computer one (rules-56 §10)
-                SimEvent::SiegeWon { besieger, .. } => self.popups.extend(Self::film_song(assets, "BELAGER.FLC", 8, if self.st.persons[*besieger as usize].human() { 12 } else { 10 })),
+                // the conquest plays the film (rules-21 §2.3), before the conquest text, 10/100 s per frame (rules-56 §10);
+                // a human besieger's plays before his plunder question (`Ask::SiegeWon`)
+                SimEvent::SiegeWon { besieger, .. } if !self.st.persons[*besieger as usize].human() => self.popups.extend(Self::film_song(assets, "BELAGER.FLC", 8, 10)),
                 // the Informant film: one of two, by the same config byte as the intro (rules-21 §4.2)
                 SimEvent::SpyNotified { film: true, .. } => {
                     let name = if assets.config.borrow().as_ref().is_some_and(|c| c.raw[0x273] != 0) { "INFORMNB.FLC" } else { "INFORMNT.FLC" };
@@ -2215,7 +2229,13 @@ impl Game {
             }
             self.scene_extra(assets, e);
             if self.popups.len() > n && i < before.len() {
-                let lines: Vec<String> = ev[flushed..=i].iter().filter(|e| !matches!(e, SimEvent::Election { .. } | SimEvent::Dismissed { .. } | SimEvent::Divine { .. } | SimEvent::Tornado { .. } | SimEvent::Insulted { .. })).filter_map(|e| self.describe(assets, e)).collect();
+                let mut lines: Vec<String> = ev[flushed..=i].iter().filter(|e| !matches!(e, SimEvent::Election { .. } | SimEvent::Dismissed { .. } | SimEvent::Divine { .. } | SimEvent::Tornado { .. } | SimEvent::Insulted { .. })).filter_map(|e| self.describe(assets, e)).collect();
+                // the window of an answered menu goes on here, before the scene (as `turn_lines` below)
+                if flushed == 0 && !self.window.is_empty() && !lines.is_empty() {
+                    let prefix = self.window.len();
+                    lines.splice(0..0, self.window.drain(..));
+                    self.continued = Some((lines.as_ptr() as usize, prefix));
+                }
                 if !lines.is_empty() {
                     self.popups.insert(n, Popup::Report(lines));
                 }
@@ -2409,7 +2429,8 @@ impl Game {
             };
             p.strip_suffix(b"$H").map(<[u8]>::to_vec).unwrap_or(p)
         };
-        let mut steps = vec![];
+        // the candidate lines alone first, until a click (live A/B 2026-11-22: 23 s without a click stay)
+        let mut steps = vec![ElectStep { strip: vec![], coin: None, timed: false, ask: false }];
         if privileged && let Some((x, _)) = result {
             let q = if self.st.persons[x as usize].gender() & 1 == 1 { "ihr" } else { "sein" };
             let s = subst(&subst(&assets.text(0xC183C), b"%1N4", &t(&self.rank(x as usize))), b"%1N1", &t(&self.pref(x, 1, 1)));
@@ -2786,6 +2807,9 @@ impl Game {
             Popup::Report(_) | Popup::YearReport(_) | Popup::Chronicle(_) => self.scroll.bottom as usize,
             Popup::Award(_) | Popup::Bill(..) | Popup::Will(_) | Popup::Ertraege(..) => 0,
             Popup::Scene { boxes, .. } | Popup::Court { boxes, .. } if hold_of(&boxes[0].1).is_none() => boxes.len(),
+            // the election's click steps (candidate lines, result) show the wheel; votes and the prompt do not (live A/B)
+            Popup::Election(el) if el.steps.get(el.pos).is_some_and(|st| !st.timed && !st.ask) => 1000 + el.pos,
+            Popup::Battle(v) if let Some(k) = v.click_wait() => 2000 + k,
             _ => return None,
         };
         Some((self.popups.len(), inner))
@@ -2818,6 +2842,11 @@ impl Game {
     /// A new report at the front starts at its first view.
     fn scroll_sync(&mut self, assets: &Assets) {
         let key = self.popups.front().map_or(0, Self::report_key);
+        // the key is the line buffer's address: forget it while no report is in front, so a report allocated where a
+        // closed one was is still new (the siege window after its question came up unscrolled)
+        if self.report_geom(assets).is_none() {
+            self.scroll.key = 0;
+        }
         if let Some(([.., h], _)) = self.report_geom(assets)
             && self.scroll.key != key
         {
@@ -2831,9 +2860,11 @@ impl Game {
                 let total = self.report_geom(assets).map_or(0, |g| g.1);
                 let shown = report_window(assets, &lines[..n.min(lines.len())]).laid.height;
                 let max_s = (total - h).max(0);
-                // whole lines, as the question window before it scrolled (`Popup::window`), so the switch does not jump
-                let s = (((shown - (12 + 24 * ((h - 12) / 24))).max(0) + 23) / 24 * 24).clamp(0, max_s);
-                let bottom = shown + 24 * (h / 24);
+                // where the question window before it scrolled to (`Popup::window`), so the switch does not jump
+                let s = (shown - h).clamp(0, max_s);
+                // the answer is a click wait: the lines after it come in until the next would pass shown + h − 24
+                // (rules-42 §1 wait test; live A/B 2026-11-22, siege: the menu's last line stays at the top)
+                let bottom = shown + 24 * ((h - 24) / 24);
                 self.scroll = ReportScroll { s, target: (bottom - h).clamp(s, max_s), bottom, key };
             }
         }
@@ -3506,10 +3537,11 @@ impl Game {
                 let s = subst(&subst(&assets.text(0x9B789), b"%4N0", &t(&self.pref(*target, 4, 0))), b"%1N0", &t(&self.pref(*insulter, 1, 0)));
                 plain(&subst_seq(&s, b"%s", &[tab(0xB5EF8, 6, *place), tab(0xB5434, 12, *taunt), tab(0xB5F30, 8, *adverb)]))
             }
-            // the gift reaction (rules-39 §7): 0x96657 "%1N0 ist %s." with a word of table 0xB5818
+            // the gift reaction (rules-39 §7): 0x96657 "$Z$L%1N0 ist %s.$N$N" with a word of table 0xB5818, its half
+            // line above and blank line below kept (live A/B 2026-11-22)
             GiftReaction { target, word } => {
                 let w = assets.name_table((0xB5818, 15)).get(*word as usize).cloned().unwrap_or_default();
-                plain(&subst(&subst(&assets.text(0x96657), b"%1N0", &t(&self.pref(*target, 1, 0))), b"%s", &t(&w)))
+                raw_line(&subst(&subst(&assets.text(0x96657), b"%1N0", &t(&self.pref(*target, 1, 0))), b"%s", &t(&w)), None)
             }
             // prisoners (rules-38 §7): castle 0xC0E4C / camp 0xC0EDC when some joined, else 0xC0F28 / 0xC0F60, then the
             // ones that vanished (0xC0F90 / 0xC0FBC)
@@ -3861,7 +3893,8 @@ impl Game {
                     out.extend(subst(&subst(&src, b"%o", &o), b"%l", (self.st.year as u32 + u32::from(years)).to_string().as_bytes()));
                 }
                 out.extend(subst(&assets.text(0x9F9E0), b"%o", &o));
-                plain(&out)
+                // printed under the answered question with the texts' own half lines (live A/B 2026-11-22)
+                raw_line(&out, None)
             }
             // relief (rules-21 §3): the meeting text of the owner's kind, then the outcome
             Relief { city, ok, besieger, owner, pop, .. } => {
@@ -4326,7 +4359,9 @@ impl Game {
         // an office-list entry's action keeps the list open underneath (rules-31 §6)
         // (also Spielstand: its row boxes appear over the list)
         // (and the privileges menu: its info boxes open over it, live A/B 2026-11-15)
-        let tree = matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Tree(..) | Menu::Spielstand | Menu::Privileges | Menu::City(_)), .. }));
+        let tree = matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Tree(..) | Menu::Spielstand | Menu::Privileges | Menu::City(_)), .. }))
+            // (and Bewerbung: the applicants window opens over its list, live A/B 2026-11-22)
+            || matches!((self.popups.front(), &a), (Some(Popup::Choice { menu: Some(Menu::Apply), .. }), Action::Open(Menu::Applicants(..))));
         // a running battle view stays while its tactic answers go out; the fight's end finishes it
         let live = matches!(self.popups.front(), Some(Popup::Battle(v)) if v.live) && matches!(a, Action::Answer(_));
         if live {
@@ -4674,7 +4709,12 @@ impl Game {
                     // a menu printed into the report window (gifts, sub-plots) stays there, the reaction prints right
                     // under it (rules-63 §2, rules-13)
                     if let Some((src, items)) = self.report_menu.take() {
-                        self.window.push(raw_line(&answered(&src, &items)));
+                        // the chosen gem stays lit (live A/B 2026-11-22); inline menus answer bullet k with Answer(k)
+                        self.window.push(raw_line(&answered(&src, &items), Some(v as usize)));
+                        // the siege goes on (0x9F69D) or is dissolved (0x9F673), printed under the answer (rules-21 §2.2)
+                        if let Ask::ContinueSiege { .. } = ask {
+                            self.window.push(raw_line(&ctx.assets.text(if v == 0 { 0x9F69D } else { 0x9F673 }), None));
+                        }
                     }
                     self.run_cmd(ctx.assets, cmd, answers);
                     if let Ask::Match { target, .. } = ask {
@@ -4703,9 +4743,12 @@ impl Game {
     /// Click on a form item: words and digits step by the clicked half and the open menu is
     /// rebuilt; everything else acts.
     fn click_form(&mut self, ctx: &mut Ctx, w: &Window, acts: &[Action], pos: (i32, i32)) -> Next {
-        // A window without choices (information) closes on any click.
+        // A window without choices (information) closes on any click; the Bewerbung applicants window only on a
+        // right click (live A/B 2026-11-22: left clicks on its text and its corner do nothing)
         if acts.is_empty() {
-            self.popups.pop_front();
+            if !matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Applicants(..)), .. })) {
+                self.popups.pop_front();
+            }
             return Next::Stay;
         }
         let Some(k) = w.item_at(pos) else { return Next::Stay };
@@ -5767,18 +5810,19 @@ impl Game {
                 p.window(assets, &[]).unwrap().with_text_dy(-self.scroll_of(p)).draw_over(frame, assets, |_| {});
                 return Some(Cursor::Arrow);
             }
-            Some(p @ Popup::Report(_)) => {
+            Some(p @ Popup::Report(lines)) => {
                 // turn-end report (rules-12 §2): wooden desk ICONB7, banner "Ereignisse", text window at (30, 110, 520, 290)
                 frame.blit(&assets.icon(0xB7)[0], 0, 0);
                 self.draw_banner(frame, assets, &assets.text(0xBB3B0), true);
                 let w = p.window(assets, &[]).unwrap().with_text_dy(-self.scroll_of(p));
                 w.draw_over(frame, assets, |_| {});
-                // the gift menu's choices keep their gems (rules-63 §2; playtest report), unlit: the answer is given
+                // the gift menu's choices keep their gems (rules-63 §2; playtest report), the chosen one lit (live A/B)
                 let [_, y, _, h] = REPORT_BOX;
+                let lit = report_lit(lines);
                 for k in 0..w.laid.items.len() {
                     let it = w.item_rect(k);
                     if it.y >= y && it.y + 16 <= y + h {
-                        frame.blit(&assets.icon(0x73)[0], it.x, it.y);
+                        frame.blit(&assets.icon(if lit.contains(&k) { 0x74 } else { 0x73 })[0], it.x, it.y);
                     }
                 }
                 return Some(Cursor::Arrow);
@@ -5847,8 +5891,8 @@ impl Game {
         {
             w.draw_over(frame, assets, |_| {});
         }
-        // a privilege's info box opens over the privileges menu, which stays with its gems (live A/B)
-        let is_priv = |p: &Popup| matches!(p, Popup::Choice { menu: Some(Menu::Privileges | Menu::City(_)), .. });
+        // a privilege's info box opens over the privileges menu, which stays with its gems (live A/B; Bewerbung too)
+        let is_priv = |p: &Popup| matches!(p, Popup::Choice { menu: Some(Menu::Privileges | Menu::City(_) | Menu::Apply), .. });
         if let (Some(front), Some(under)) = (self.popups.front(), self.popups.get(1))
             && is_priv(under)
             && !is_priv(front)
@@ -6383,9 +6427,40 @@ pub(crate) mod tests {
         assert!(matches!(g.popups.front(), Some(Popup::Report(l)) if l[0].contains("schenken") && l.len() >= 2), "{:?}", g.popups.iter().map(|p| match p { Popup::Report(l) => format!("Report {l:?}"), Popup::Choice { src, .. } => format!("Choice {}", plain(src)), Popup::Bill(..) => "Bill".into(), _ => "other".into() }).collect::<Vec<_>>());
         // its choices keep their gem bullets (playtest report)
         assert_eq!(g.popups.front().unwrap().window(&assets, &[]).unwrap().laid.items.len(), 4);
+        // the chosen one stays lit (live A/B 2026-11-22)
+        assert!(matches!(g.popups.front(), Some(Popup::Report(l)) if report_lit(l) == [3]));
         shot(&g, &assets, "courtship_gift_answered");
         let i = g.st.heap.find(30, h as u8, mad_sim::heap::ANY).expect("still courting");
         assert_eq!(mad_sim::heap::r32(&g.st.heap.recs[i], 4), 0, "refusing the gift is free");
+    }
+
+    /// rules-21 §2.2 (live A/B 2026-11-22): the continue question of a human's siege is printed into the turn-end
+    /// window and its answer line follows under it.
+    #[test]
+    fn real_siege_continue_in_report() {
+        let Some(assets) = test_assets() else { return };
+        for seed in 1..40 {
+            let mut st = State::new_game(seed, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap();
+            let h = st.current as usize;
+            let army = st.cities[4].population() / 5 + 1;
+            let i = st.heap.alloc(25, h as u8, mad_sim::state::NONE, 3).unwrap();
+            st.heap.recs[i][4] = 4;
+            mad_sim::heap::w16(&mut st.heap.recs[i], 5, army as u16);
+            let mut g = Game::start(&assets, st);
+            g.popups.clear();
+            let mut audio = crate::audio::Audio::new(false);
+            let mut ctx = ctx_for(&assets, &mut audio);
+            g.act(Action::EndTurn, &mut ctx);
+            if !matches!(g.pending.as_ref().map(|p| &p.ask), Some(Ask::ContinueSiege { .. })) {
+                continue;
+            }
+            let k = g.popups.iter().position(|p| matches!(p, Popup::Choice { rect, .. } if *rect == REPORT_BOX)).expect("question in the report window");
+            g.popups.drain(..k);
+            g.act(Action::Answer(0), &mut ctx);
+            assert!(matches!(g.popups.front(), Some(Popup::Report(l)) if report_lit(l) == [0] && l.iter().any(|x| x.contains("fortgesetzt"))));
+            return;
+        }
+        panic!("no seed asked the continue question");
     }
 
     /// A sub-plot question after the gift in one turn end (rules-13, rules-63 §2): the gift reaction is shown before
@@ -6690,7 +6765,8 @@ pub(crate) mod tests {
         assert!(sur.contains("Ferdinand II.") && sur.contains("14%") && sur.contains("9.000"), "{sur}");
         let bl = line(&SimEvent::BlackmailEnded { by: me });
         assert!(bl.contains("erpressen") && !bl.contains("%1"), "{bl}");
-        let won = line(&SimEvent::SiegeWon { besieger: me, city: 3, choice: 2, tribute: (1500, 4) });
+        // a markup line (`RAW`, then the lit mark): back to text
+        let won = plain(&line(&SimEvent::SiegeWon { besieger: me, city: 3, choice: 2, tribute: (1500, 4) }).chars().skip(2).map(|c| c as u8).collect::<Vec<_>>());
         assert!(won.contains("Lösegeld") && won.contains("3.000") && won.contains("1.500") && won.contains("aufgelöst") && !won.contains('%'), "{won}");
         let lost = line(&SimEvent::TransporterLost { owner: me, kind: 1, dest: 3 });
         assert!(lost.contains("Riff") && !lost.contains('%'), "{lost}");
@@ -7027,13 +7103,13 @@ pub(crate) mod tests {
         let (c, e) = (comp.next().unwrap(), comp.next().unwrap());
         let cands = [c, h];
         let mut el = g.election_screen(&assets, (3, 6), 0xC1, &cands, &[0xFF, 0xFF], false, &[(e, c)], None, Some((h, 0xFF)));
-        assert_eq!(el.steps.iter().map(|st| (st.coin, st.timed, st.ask)).collect::<Vec<_>>(), vec![(None, true, false), (Some(0), true, false), (None, false, true)]);
-        el.pos = 2;
+        assert_eq!(el.steps.iter().map(|st| (st.coin, st.timed, st.ask)).collect::<Vec<_>>(), vec![(None, false, false), (None, true, false), (Some(0), true, false), (None, false, true)]);
+        el.pos = 3;
         assert_eq!(el.line_at((200, 150 + 24)), Some(1), "the second candidate's line");
         let done = g.election_screen(&assets, (3, 6), 0xC1, &cands, &[0xFF, 0xFF], false, &[(e, c), (h, h)], Some((h, 1)), None);
         el.continue_with(done);
-        assert_eq!(el.pos, 3, "past the human's prompt, on his vote");
-        assert_eq!((el.steps[3].coin, el.coins()), (Some(1), vec![1, 1]));
+        assert_eq!(el.pos, 4, "past the human's prompt, on his vote");
+        assert_eq!((el.steps[4].coin, el.coins()), (Some(1), vec![1, 1]));
     }
 
     /// Elections and dismissals are place pictures with caption boxes (screenshot with MAD_SHOT_DIR).
@@ -7048,17 +7124,21 @@ pub(crate) mod tests {
         // rules-15 §3.4: the candidate lines, then each computer vote in two timed strip lines (the coin with the
         // second), then the result waiting for a click
         let Some(Popup::Election(el)) = g.popups.front() else { panic!("the election screen") };
-        assert_eq!((el.pic, el.names.len(), el.steps.len()), (0xC1, 2, 3));
-        assert_eq!(el.steps.iter().map(|st| (st.coin, st.timed)).collect::<Vec<_>>(), vec![(None, true), (Some(1), true), (None, false)]);
+        assert_eq!((el.pic, el.names.len(), el.steps.len()), (0xC1, 2, 4));
+        assert_eq!(el.steps.iter().map(|st| (st.coin, st.timed)).collect::<Vec<_>>(), vec![(None, false), (None, true), (Some(1), true), (None, false)]);
         shot(&g, &assets, "election_scene");
         let mut audio = crate::audio::Audio::new(false);
         let mut ctx = ctx_for(&assets, &mut audio);
+        // the candidate lines wait for a click, then the votes run timed
+        g.update(&mut ctx, &Input::default(), 10 * Elect::TIMEOUT_MS);
+        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 0));
+        g.update(&mut ctx, &Input { events: vec![Event::Left(10, 10)], ..Default::default() }, 0);
         g.update(&mut ctx, &Input::default(), Elect::TIMEOUT_MS);
-        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 1 && el.coins() == vec![0, 1]));
+        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 2 && el.coins() == vec![0, 1]));
         shot(&g, &assets, "election_vote");
         g.update(&mut ctx, &Input::default(), Elect::TIMEOUT_MS);
         g.update(&mut ctx, &Input::default(), 10 * Elect::TIMEOUT_MS);
-        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 2), "the result waits for a click");
+        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 3), "the result waits for a click");
         g.update(&mut ctx, &Input { events: vec![Event::Left(10, 10)], ..Default::default() }, 0);
         assert!(g.popups.is_empty());
         g.popups.clear();

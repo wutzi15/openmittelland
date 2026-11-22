@@ -274,6 +274,12 @@ impl BattleView {
         (x + w / 2, y + h / 2)
     }
 
+    /// A caption over the field that waits for a click (intro captions, "Wohlan"): its number, for the wheel cursor
+    /// (live A/B 2026-11-22: the original shows the wheel and waits, 25 s without a click change nothing).
+    pub fn click_wait(&self) -> Option<usize> {
+        (self.caption_open() || self.overlay == Some(Overlay::Intro)).then(|| self.captions.len() + 100 * usize::from(self.overlay.is_some()))
+    }
+
     pub fn overlay_open(&self) -> bool {
         self.overlay.is_some() || self.caption_open()
     }

@@ -842,13 +842,14 @@ impl Game {
             }
             Menu::Applicants(loc, idx) => {
                 // rules-64 §2: the other owners' applications for this seat in heap order, four named, then "...und
-                // andere"; "Niemand" when there are none; the bullets are inert, any click closes
+                // andere"; "Niemand" when there are none; any click closes. `$a` is the EXE's fixed `$L$2>-$E$B$6>`
+                // (0xBB594): a dash, not a bullet item (live A/B 2026-11-22), so the window has no items
                 f.raw(&assets.text(0xBD0B0));
                 let others: Vec<u8> = self.st.heap.all(5, ANY, ANY).into_iter().filter(|&i| {
                     let r = &self.st.heap.recs[i];
                     r[1] as usize != h && r[3] & 0x80 == 0 && (r[4], r[5]) == (loc, idx)
                 }).map(|i| self.st.heap.recs[i][1]).collect();
-                let line = |src: Vec<u8>| src.strip_prefix(b"$a").map(<[u8]>::to_vec).unwrap_or(src);
+                let line = |src: Vec<u8>| src.strip_prefix(b"$a").map_or(src.clone(), |s| [b"$L$2>-$E$B$6>".as_slice(), s].concat());
                 for (k, &a) in others.iter().enumerate() {
                     let src = if k == 4 {
                         assets.text(0xBD13C)
@@ -858,13 +859,13 @@ impl Game {
                     } else {
                         self.exe_fmt(assets, &assets.text(0xBD128), &[mad_sim::WArg::P(a), mad_sim::WArg::P(a)])
                     };
-                    f.item_bullet_raw(&line(src), Action::Close);
+                    f.raw(&line(src));
                     if k == 4 {
                         break;
                     }
                 }
                 if others.is_empty() {
-                    f.item_bullet_raw(&line(assets.text(0xBD150)), Action::Close);
+                    f.raw(&line(assets.text(0xBD150)));
                 }
                 self.popups.push_back(f.popup_at([60, 140, 520, 200]).with_menu(m));
                 return;
@@ -1130,8 +1131,13 @@ impl Game {
                     self.popups.push_back(f.popup(assets, 120, 400, None).with_menu(m));
                     return;
                 }
-                if matches!(q, mad_sim::Ask::Gift { .. } | mad_sim::Ask::Plot { .. }) {
-                    // rules-63 §2, rules-13: printed into the turn-end report window, no dialog of their own
+                if matches!(q, mad_sim::Ask::Gift { .. } | mad_sim::Ask::Plot { .. } | mad_sim::Ask::ContinueSiege { .. } | mad_sim::Ask::SiegeWon { .. }) {
+                    // rules-63 §2, rules-13, rules-21 §2.2: printed into the turn-end report window, no dialog of their own
+                    if let mad_sim::Ask::SiegeWon { .. } = q {
+                        // the conquest film plays first, 12/100 s per frame (rules-56 §10), then a fresh window (live A/B)
+                        self.popups.extend(Self::film_song(assets, "BELAGER.FLC", 8, 12));
+                        self.window.clear();
+                    }
                     self.report_menu = Some((f.src.clone(), f.items.clone()));
                     // the window's text so far stands above the question; the gems of menus answered before are inert
                     let pre = super::report_src(&self.window);
@@ -2451,7 +2457,7 @@ impl Game {
     /// The courtship gift menu text (EXE 0x963C3; gift k names from GIFT_NAMES[k], rules-56 §1).
     pub(super) fn gift_text(&self, assets: &Assets, target: u8, prices: [i32; 3], names: [u8; 3]) -> Vec<u8> {
         let gifts: Vec<Vec<u8>> = (0..3).map(|k| assets.text(GIFT_NAMES[k][names[k] as usize % GIFT_NAMES[k].len()])).collect();
-        let src = super::subst(&assets.text(0x963C3), b"%3N5", &t(&self.person_name(target)));
+        let src = super::subst(&assets.text(0x963C3), b"%3N5", &t(&self.pref(target, 3, 5)));
         let src = super::subst_seq(&src, b"%s", &gifts);
         super::subst_seq(&src, b"%d", &prices.map(|p| p.to_string().into_bytes()))
     }
