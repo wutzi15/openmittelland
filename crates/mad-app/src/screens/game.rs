@@ -639,6 +639,7 @@ enum Pref {
     EventLog,
     OrderCopy,
     Confirmations,
+    OfficeInfo,
 }
 
 #[derive(Clone, Debug)]
@@ -1049,6 +1050,8 @@ pub struct Game {
     unvisited: bool,
     /// The rival's entry action in the office list (drawn highlighted at rest).
     tree_rival: Option<String>,
+    /// Ours (`prefs.office_info`): every human's rival when the office tree opened.
+    tree_rivals: Vec<usize>,
     /// Spinner values of the branch sub-windows (rules-34), reset when a window opens from the branch screen.
     amts: [u32; 4],
     /// The pre-fight window's page text before its question (rules-52).
@@ -1346,6 +1349,7 @@ impl Game {
             tip: ((-1, -1), 0),
             unvisited: true, // a loaded game starts in a turn with no branch visited yet
             tree_rival: None,
+            tree_rivals: vec![],
             amts: [0; 4],
             page: vec![],
             bribing: false,
@@ -4661,6 +4665,7 @@ impl Game {
                             Pref::EventLog => p.event_log ^= true,
                             Pref::OrderCopy => p.order_copy ^= true,
                             Pref::Confirmations => p.confirmations ^= true,
+                            Pref::OfficeInfo => p.office_info ^= true,
                         }
                         self.st.house = p.house();
                         if let Err(e) = p.save(&ctx.assets.user_saves) {
@@ -5626,7 +5631,9 @@ impl Screen for Game {
             let (x, y) = rooms::SELL_ALL_AT;
             text::draw(frame, &assets.font, &text::layout(&assets.font, &src, &[], &[], 640 - x, &[]), x - text::INSET, y - text::INSET);
         }
-        if let Some(tip) = self.tooltip(assets, mouse) {
+        if let Some(lines) = self.office_tip(assets, mouse) {
+            tips::draw_lines(frame, assets, &lines, (mouse.0 + 14, mouse.1 + 22));
+        } else if let Some(tip) = self.tooltip(assets, mouse) {
             tips::draw_tip(frame, assets, &tip, mouse);
         }
         // the wheel of wait_click: 16 frames, one per BIOS tick (~55 ms), restarted by every wait (rules-41 §3)

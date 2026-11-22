@@ -55,6 +55,26 @@ pub(crate) const GIFT_NAMES: [&[u32]; 3] = [
     &[0x965C3, 0x965D7, 0x965EC, 0x9660E, 0x9661E, 0x96632],
 ];
 
+/// Office tree geometry (rules-31): entries per level, first index within the level, first global index.
+pub(super) fn tree_slots(loc: u8, church: bool) -> (usize, usize, usize) {
+    match (loc, church) {
+        (0..=9, false) => (7, 0, 0),
+        (0..=9, true) => (3, 7, 7),
+        (10..=12, false) => (8, 0, 10),
+        (10..=12, true) => (5, 8, 18),
+        (_, false) => (8, 0, 23),
+        (_, true) => (3, 8, 31),
+    }
+}
+/// Column (x 100) and row (x 36 + 48) of each global office in the 600x400 tree window.
+pub(super) const COL: [i32; 34] = [0, 2, 4, 0, 2, 4, 2, 1, 3, 2, 0, 2, 4, 0, 2, 4, 2, 2, 0, 2, 3, 1, 2, 0, 2, 4, 0, 2, 4, 2, 2, 1, 3, 2];
+pub(super) const ROW: [i32; 34] = [5, 5, 5, 3, 3, 3, 1, 4, 4, 2, 6, 6, 6, 4, 4, 4, 2, 0, 5, 5, 3, 3, 1, 6, 6, 6, 4, 4, 4, 2, 0, 4, 4, 2];
+/// Screen rectangle of the tree entry of (loc, idx): the 200 px column, three text rows (rules-31 §5.2).
+pub(super) fn tree_entry_rect(loc: u8, idx: u8) -> [i32; 4] {
+    let k = mad_sim::career::global_of(loc as usize, idx as usize);
+    [20 + COL[k] * 100, 40 + ROW[k] * 36 + 48, 200, 3 * crate::text::LINE_H]
+}
+
 impl Game {
     /// Rebuild an open window in place: the new one takes the old one's place in the queue, in front of the
     /// windows waiting behind it (playtest: typing a baby's name sent the cradle behind the year-end windows).
@@ -481,6 +501,7 @@ impl Game {
                         (tr("Chronik (Taste L):", "Log (key L):"), on(p.event_log), EventLog),
                         (tr("Aufträge kopieren (C, E):", "Copy orders (C, E):"), on(p.order_copy), OrderCopy),
                         (tr("Sicherheitsfragen:", "Confirmations:"), on(p.confirmations), Confirmations),
+                        (tr("Amtsinfo:", "Office info:"), on(p.office_info), OfficeInfo),
                         (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
                         (tr("Bis 255 Arbeiter:", "Up to 255 workers:"), on(p.more_workers), MoreWorkers),
                     ]
@@ -988,21 +1009,15 @@ impl Game {
                 // mode 12 (rules-29 §3): "^ Anschwärzen bei... _" without the place
                 let title = if matches!(plot, Plot::DenounceTo(_)) { format!("{} bei...", plot.verb()) } else { format!("{} in {}", plot.verb(), self.loc(loc)) };
                 f.raw(b"$H$C^ ").txt(&title).raw(b" _$N");
-                let (n, obase, nbase) = match (loc, church) {
-                    (0..=9, false) => (7, 0, 0),
-                    (0..=9, true) => (3, 7, 7),
-                    (10..=12, false) => (8, 0, 10),
-                    (10..=12, true) => (5, 8, 18),
-                    (_, false) => (8, 0, 23),
-                    (_, true) => (3, 8, 31),
-                };
-                const COL: [i32; 34] = [0, 2, 4, 0, 2, 4, 2, 1, 3, 2, 0, 2, 4, 0, 2, 4, 2, 2, 0, 2, 3, 1, 2, 0, 2, 4, 0, 2, 4, 2, 2, 1, 3, 2];
-                const ROW: [i32; 34] = [5, 5, 5, 3, 3, 3, 1, 4, 4, 2, 6, 6, 6, 4, 4, 4, 2, 0, 5, 5, 3, 3, 1, 6, 6, 6, 4, 4, 4, 2, 0, 4, 4, 2];
+                let (n, obase, nbase) = tree_slots(loc, church);
                 // the level toggle redraws the same window in its place (rules-31 §6), it does not stack a second one
                 // (playtest: the church level went behind the bribery map)
                 let at = self.popups.iter().position(|p| matches!(p, super::Popup::Choice { menu: Some(Menu::Tree(..)), .. }));
                 self.popups.retain(|p| !matches!(p, super::Popup::Choice { menu: Some(Menu::Tree(..)), .. }));
-                let rival = self.st.clone().rival_of(h);
+                let mut cl = self.st.clone();
+                let rival = cl.rival_of(h);
+                // ours (office info): every human's rival, whose score the vote tops up with rand(20)
+                self.tree_rivals = if assets.prefs.borrow().office_info { self.st.humans().filter_map(|x| cl.rival_of(x)).collect() } else { vec![] };
                 self.tree_bars.clear();
                 self.tree_rival = None;
                 for i in 0..n {

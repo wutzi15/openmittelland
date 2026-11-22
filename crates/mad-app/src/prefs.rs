@@ -50,6 +50,8 @@ pub struct Prefs {
     pub order_copy: bool,
     /// A Ja/Nein question before irreversible actions the original runs at once (bribe, blackmail, spies, …).
     pub confirmations: bool,
+    /// Office info: resting on an office in the office tree tells who appoints it, the applicants and the likely vote.
+    pub office_info: bool,
 }
 
 impl Default for Prefs {
@@ -75,6 +77,7 @@ impl Default for Prefs {
             event_log: false,
             order_copy: false,
             confirmations: false,
+            office_info: false,
         }
     }
 }
@@ -107,6 +110,7 @@ impl Prefs {
                 "event_log" => p.event_log = b,
                 "order_copy" => p.order_copy = b,
                 "confirmations" => p.confirmations = b,
+                "office_info" => p.office_info = b,
                 _ => {}
             }
         }
@@ -116,7 +120,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\noffice_info={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -137,6 +141,7 @@ impl Prefs {
             b(self.event_log),
             b(self.order_copy),
             b(self.confirmations),
+            b(self.office_info),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -160,7 +165,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, office_info: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();

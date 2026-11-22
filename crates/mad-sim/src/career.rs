@@ -103,6 +103,22 @@ pub fn seat_group(loc: usize, idx: usize) -> std::ops::Range<usize> {
     }
 }
 
+/// Result of [`State::forecast`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Forecast {
+    /// (voter, appointer he stands for or NONE), as in the election.
+    pub electors: Vec<(usize, u8)>,
+    pub candidates: Vec<usize>,
+    pub privileged: bool,
+    /// Per elector, per candidate: base score and whether the office branch (rival's rand(20)) applies.
+    pub scores: Vec<Vec<(i32, bool)>>,
+    /// Per elector: the candidate index he votes for; None for a human elector or without candidates.
+    pub picks: Vec<Option<usize>>,
+    pub votes: Vec<u32>,
+    /// Candidate indices with the most votes (one: the winner; several: the lot decides).
+    pub leaders: Vec<usize>,
+}
+
 // ---- favour primitives (§1) ----
 
 impl State {
@@ -212,12 +228,14 @@ impl State {
         }
     }
 
+    /// The appointer seats of (loc, idx) as (place, index within level); empty for Vogt and Regent (the lot).
+    pub fn appointer_seats(loc: usize, idx: usize) -> Vec<(usize, usize)> {
+        APPOINTERS[global_of(loc, idx)].iter().map(|&(at, i)| (Self::appointer_loc(loc, at), i as usize)).collect()
+    }
+
     /// Holders of the appointer seats of (loc, idx); missing holders skipped.
     pub fn appointers(&self, loc: usize, idx: usize) -> Vec<usize> {
-        APPOINTERS[global_of(loc, idx)]
-            .iter()
-            .filter_map(|&(at, i)| self.holder(Self::appointer_loc(loc, at), i as usize))
-            .collect()
+        Self::appointer_seats(loc, idx).into_iter().filter_map(|(l, i)| self.holder(l, i)).collect()
     }
 
     /// `office_vacate(p)` (0x45980).
@@ -566,19 +584,8 @@ impl State {
     /// One election for (loc, seat); false when it stopped because a human may apply.
     fn fill_one(&mut self, loc: usize, seat: usize, group: &std::ops::Range<usize>, snap: &[(usize, usize)], ch: &mut dyn Choices, ev: &mut Vec<Event>) -> bool {
         let o = global_of(loc, seat);
-        // electors with the appointer they stand for when they blackmail him (NONE: their own vote)
-        let mut electors: Vec<(usize, u8)> = vec![];
-        for a in self.appointers(loc, seat) {
-            let bm: Vec<usize> = (0..PERSONS).filter(|&x| self.persons[a].favour(x) > 100 && self.persons[x].used()).collect();
-            if bm.is_empty() { electors.push((a, NONE)) } else { electors.extend(bm.into_iter().map(|x| (x, a as u8))) }
-        }
-        let privileged = match o {
-            33 => self.holder(13, 8),
-            22 => self.holder(loc, 10),
-            21 => self.holder(loc, 9),
-            _ => None,
-        }
-        .filter(|&c| self.applicants(loc, group).contains(&c));
+        let electors = self.electors(loc, seat);
+        let privileged = self.privileged(loc, group);
         // E | A (rules-44 §3): a human elector, or a human among all applicants (the shut-out ones too)
         let shown = electors.iter().any(|&(e, _)| self.persons[e].human()) || self.applicants(loc, group).iter().any(|&c| self.persons[c].human());
         let mut cands: Vec<usize> = match privileged {
@@ -659,7 +666,11 @@ impl State {
                 } else {
                     let mut best = (i32::MIN, 0);
                     for (k, &c) in cands.iter().enumerate() {
-                        let s = self.vote_score(e, c, loc, o, snap);
+                        let (mut s, office) = self.vote_score_base(e, c, loc, o);
+                        // a human's year-start rival, not a human candidate (rules-65 §4)
+                        if office && snap.iter().any(|&(_, r)| r == c) {
+                            s += self.ri(20);
+                        }
                         if s > best.0 {
                             best = (s, k);
                         }
@@ -700,10 +711,15 @@ impl State {
         true
     }
 
-    fn vote_score(&mut self, e: usize, c: usize, loc: usize, o: usize, snap: &[(usize, usize)]) -> i32 {
+    /// The deterministic part of a computer elector's score for candidate `c` (§4.6, rules-65 §4): favour + title,
+    /// and for a holder of an office of the vacant one's kind the colleague and seniority terms. The flag says that
+    /// office branch applied, where the real election adds rand(20) for a human's rival. Shared by the election and
+    /// the forecast so the two cannot drift.
+    pub fn vote_score_base(&self, e: usize, c: usize, loc: usize, o: usize) -> (i32, bool) {
         let pc = &self.persons[c];
         let mut s = self.persons[e].favour(c) as i32 + pc.title() as i32;
-        if pc.has_office() && is_church_office(global_office(pc)) == is_church_office(o) {
+        let office = pc.has_office() && is_church_office(global_office(pc)) == is_church_office(o);
+        if office {
             if pc.loc() as usize == loc {
                 let kind = pc.church();
                 let col: Vec<usize> = self
@@ -716,13 +732,70 @@ impl State {
                     s += sum / (col.len() as i32 * 8);
                 }
             }
-            s += (33 - (o as i32 - global_office(&self.persons[c]) as i32).max(0)) >> 1;
-            // a human's year-start rival, not a human candidate (rules-65 §4)
-            if snap.iter().any(|&(_, r)| r == c) {
-                s += self.ri(20);
-            }
+            s += (33 - (o as i32 - global_office(pc) as i32).max(0)) >> 1;
         }
-        s
+        (s, office)
+    }
+
+    /// Electors of (loc, seat) with the appointer each stands for when he blackmails him (NONE: his own vote).
+    pub fn electors(&self, loc: usize, seat: usize) -> Vec<(usize, u8)> {
+        let mut electors: Vec<(usize, u8)> = vec![];
+        for a in self.appointers(loc, seat) {
+            let bm: Vec<usize> = (0..PERSONS).filter(|&x| self.persons[a].favour(x) > 100 && self.persons[x].used()).collect();
+            if bm.is_empty() { electors.push((a, NONE)) } else { electors.extend(bm.into_iter().map(|x| (x, a as u8))) }
+        }
+        electors
+    }
+
+    /// The privileged holder of (loc, group) (Erzdiakon, Diakon, Sakristan) when he applied: the only candidate.
+    pub fn privileged(&self, loc: usize, group: &std::ops::Range<usize>) -> Option<usize> {
+        match global_of(loc, group.start) {
+            33 => self.holder(13, 8),
+            22 => self.holder(loc, 10),
+            21 => self.holder(loc, 9),
+            _ => None,
+        }
+        .filter(|&c| self.applicants(loc, group).contains(&c))
+    }
+
+    /// Ours (office info): the likely outcome of the next election for a vacant (loc, seat) among the current
+    /// applicants, without RNG. Per elector the first candidate with the highest base score (None for a human
+    /// elector), then the candidates with most votes.
+    pub fn forecast(&self, loc: usize, seat: usize) -> Forecast {
+        let o = global_of(loc, seat);
+        let group = seat_group(loc, seat);
+        let privileged = self.privileged(loc, &group);
+        let mut candidates = match privileged {
+            Some(c) => vec![c],
+            None => self.applicants(loc, &group),
+        };
+        candidates.dedup();
+        let electors = self.electors(loc, seat);
+        let scores: Vec<Vec<(i32, bool)>> =
+            electors.iter().map(|&(e, _)| candidates.iter().map(|&c| self.vote_score_base(e, c, loc, o)).collect()).collect();
+        let picks: Vec<Option<usize>> = electors
+            .iter()
+            .zip(&scores)
+            .map(|(&(e, _), sc)| {
+                if self.persons[e].human() || sc.is_empty() {
+                    return None;
+                }
+                let mut best = (i32::MIN, 0);
+                for (k, &(s, _)) in sc.iter().enumerate() {
+                    if s > best.0 {
+                        best = (s, k);
+                    }
+                }
+                Some(best.1)
+            })
+            .collect();
+        let mut votes = vec![0u32; candidates.len()];
+        for k in picks.iter().flatten() {
+            votes[*k] += 1;
+        }
+        let max = votes.iter().copied().max().unwrap_or(0);
+        let leaders = (0..candidates.len()).filter(|&k| votes[k] == max).collect();
+        Forecast { electors, candidates, privileged: privileged.is_some(), scores, picks, votes, leaders }
     }
 
     /// Year-end office cycle (§4.1 - §4.6), in order.
@@ -858,6 +931,35 @@ mod tests {
         b.year_end_offices(&mut Auto);
         assert!(a == b);
         assert!(a.holder(4, 6).is_some(), "Bürgermeister refilled");
+    }
+
+    /// Ours: the RNG-free forecast names the winner the real election picks when no human and no rival is involved
+    /// (the only random term then is the lot among tied leaders).
+    #[test]
+    fn forecast_matches_election() {
+        let mut checked = 0;
+        for seed in 1..40u32 {
+            let mut st = State::new_world(seed);
+            st.year = 1601;
+            let (loc, seat) = (4, 6);
+            let v = st.holder(loc, seat).unwrap();
+            st.vacate_silently(v);
+            let cands: Vec<usize> = st.computers().filter(|&x| st.eligibility(x, loc, seat) == 2).take(3).collect();
+            for &c in &cands {
+                st.apply_for(c, loc, seat, true);
+            }
+            let f = st.forecast(loc, seat);
+            assert_eq!(f.candidates, cands);
+            assert_eq!(f.electors.len(), 3);
+            if f.leaders.len() != 1 {
+                continue;
+            }
+            let mut ev = vec![];
+            st.fill_vacancies(&[], &mut Auto, &mut ev);
+            assert_eq!(st.holder(loc, seat), Some(f.candidates[f.leaders[0]]), "seed {seed}: {f:?}");
+            checked += 1;
+        }
+        assert!(checked >= 10, "{checked}");
     }
 
     /// rules-65 §1/§2: a seat a human could take stays open for a year, but the drawn computers are registered at

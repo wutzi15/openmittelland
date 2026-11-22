@@ -50,6 +50,7 @@ OpenMittelland adds optional features the original does not have. All are off by
 | | Alles verkaufen | `V` | sell the stock of every branch at once |
 | | Chronik | `L` | every report of this session |
 | | Aufträge kopieren | `C`, `E` | copy orders from one branch to another |
+| | Amtsinfo | | who fills an office and how the vote stands |
 | | Sicherheitsfragen | | ask before actions that can't be taken back |
 | | Gnade bei Schulden | | house rule: debt never takes your last branch |
 | | Bis 255 Arbeiter | | house rule: up to 255 workers per production order |
@@ -76,6 +77,7 @@ The keys work in the Kontor (some also on the Handel map or the branch screen) a
 - **Alles verkaufen.** `V` in the Kontor or on the Handel map, or the gold "Verkaufen" on the map's sea. After a Ja/Nein question it sells the whole stock of every branch at local prices, exactly as if you clicked the empty-warehouse icon in each branch, and shows what was sold where.
 - **Chronik.** `L` in the Kontor: the text of every report window of this session (turn ends, year ends, fate), newest first, page by page. It starts empty after loading.
 - **Aufträge kopieren.** On a branch screen `C` copies its four order slots, `E` pastes them into the branch you are looking at. The game checks each order at the new place; an order that is impossible there shows as impossible. Confirmed orders already carry over to the next year by themselves.
+- **Amtsinfo.** In the bribery office trees (gold display → map → a city, county, the principality or the church level), rest the pointer on an office. The box shows who holds it (a held seat frees up only by dismissal, death or promotion) or that it is filled at the year end; who appoints it and your favour with each of them (Vogt and Regent are drawn by lot; someone who blackmails an elector votes in his place); the applicants, or, if nobody applied, that three random eligible persons and the players' rivals stand, and that the seat stays empty one more year if you are eligible; whether you are eligible or have applied; and each elector's current favourite with the likely winner. The forecast uses the game's own voting rule but today's favours: the year end changes favours, dismisses and replaces people before the vote, and a rival's score gets a random 0 to 19 on top.
 - **Sicherheitsfragen.** A Ja/Nein question before bribes, denunciations, blackmail, hiring spies, dismissing troops and selling a castle. Saboteurs and selling a branch or residence already ask in the original.
 
 #### House rules

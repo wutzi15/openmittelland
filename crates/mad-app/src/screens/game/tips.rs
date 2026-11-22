@@ -253,6 +253,117 @@ impl Game {
     }
 }
 
+impl Game {
+    /// Ours (`prefs.office_info`): the office of the open tree window under the rested pointer, and its info lines.
+    pub(super) fn office_tip(&self, assets: &Assets, mouse: (i32, i32)) -> Option<Vec<String>> {
+        let p = assets.prefs.borrow();
+        if !p.office_info || self.tip.0 != mouse || self.tip.1 < TIP_MS {
+            return None;
+        }
+        let Some(Popup::Choice { menu: Some(Menu::Tree(_, loc, church)), .. }) = self.popups.front() else { return None };
+        let (n, obase, _) = super::menus::tree_slots(*loc, *church);
+        let idx = (obase..obase + n).map(|i| i as u8).find(|&i| hit(super::menus::tree_entry_rect(*loc, i), mouse))?;
+        Some(self.office_info(&p, *loc as usize, idx as usize))
+    }
+
+    /// Who fills (loc, idx) and how (rules-03 §3, §4.6; rules-65): appointers with the player's favour, holder or
+    /// applicants, the player's own standing, and the RNG-free forecast of the vote.
+    fn office_info(&self, p: &Prefs, loc: usize, idx: usize) -> Vec<String> {
+        use mad_sim::career::global_of;
+        let tr = |de: &'static str, en: &'static str| p.tr(de, en).to_string();
+        let st = &self.st;
+        let me = self.me();
+        let o = global_of(loc, idx);
+        let who = |x: usize| format!("{} ({})", self.first_name(x), self.office_of(x));
+        let mut v = vec![format!("{} {} {}", self.office(loc as u8, idx as u8), tr("in", "in"), self.loc(loc as u8))];
+        let holder = st.holder(loc, idx);
+        match holder {
+            Some(x) => {
+                v.push(format!("{} {}", tr("Inhaber:", "Holder:"), self.person_name(x as u8)));
+                v.push(tr("Frei nur durch Entlassung, Tod oder Aufstieg.", "Freed only by dismissal, death or promotion."));
+            }
+            None if st.year < 1601 => v.push(tr("Unbesetzt, Wahl am Jahresende ab 1601.", "Vacant, elected at the year end from 1601.")),
+            None => v.push(tr("Unbesetzt, Wahl am Jahresende.", "Vacant, elected at the year end.")),
+        }
+        // the appointer seats, each with its holder or the blackmailers who vote in his place
+        let seats = mad_sim::State::appointer_seats(loc, idx);
+        let electors = st.electors(loc, idx);
+        if seats.is_empty() {
+            v.push(tr("Ernennung: das Los.", "Appointment: by lot."));
+        } else {
+            v.push(tr("Ernennung durch:", "Appointed by:"));
+            for (l, i) in seats {
+                let seat = if l == loc { self.office(l as u8, i as u8) } else { format!("{} ({})", self.office(l as u8, i as u8), self.loc(l as u8)) };
+                let Some(a) = st.holder(l, i) else {
+                    v.push(format!("  {seat}: {}", tr("unbesetzt", "vacant")));
+                    continue;
+                };
+                let fav = |e: usize| me.map(|h| format!(", {} {}", tr("Gunst zu dir", "favour to you"), st.persons[e].favour(h))).unwrap_or_default();
+                let bm: Vec<usize> = electors.iter().filter(|&&(_, f)| f == a as u8).map(|&(e, _)| e).collect();
+                if bm.is_empty() {
+                    v.push(format!("  {seat}: {}{}", self.first_name(a), fav(a)));
+                } else {
+                    v.push(format!("  {seat}: {} {}:", self.first_name(a), tr("erpresst, es wählen", "blackmailed, voting instead")));
+                    for e in bm {
+                        v.push(format!("    {}{}", who(e), fav(e)));
+                    }
+                }
+            }
+        }
+        if holder.is_some() {
+            return v;
+        }
+        // a vacant seat: privileged candidate, applicants, the player, the forecast
+        let f = st.forecast(loc, idx);
+        if let Some(x) = match o { 33 => st.holder(13, 8), 22 => st.holder(loc, 10), 21 => st.holder(loc, 9), _ => None } {
+            v.push(format!("{} {}", tr("Privilegierter Kandidat:", "Privileged candidate:"), who(x)));
+            v.push(tr("  Bewirbt er sich, ist er der einzige Kandidat.", "  If he applies he is the only candidate."));
+        }
+        if f.candidates.is_empty() {
+            v.push(tr("Bewerber: keine. Zufällige wählbare Personen und die", "Applicants: none. Random eligible persons and the"));
+            v.push(tr("Rivalen treten an; ist ein Mensch wählbar, bleibt der", "rivals stand; if a human is eligible the seat stays"));
+            v.push(tr("Sitz ein Jahr länger frei.", "empty one more year."));
+        } else {
+            v.push(format!("{} {}", tr("Bewerber:", "Applicants:"), f.candidates.iter().map(|&c| self.first_name(c)).collect::<Vec<_>>().join(", ")));
+        }
+        if let Some(h) = me {
+            let applied = st.applicants(loc, &mad_sim::career::seat_group(loc, idx)).contains(&h);
+            let s = match (st.eligibility(h, loc, idx), applied) {
+                (0, _) => tr("nicht wählbar", "not eligible"),
+                (_, true) => tr("wählbar, beworben", "eligible, applied"),
+                _ => tr("wählbar, nicht beworben", "eligible, not applied"),
+            };
+            v.push(format!("{} {s}", tr("Du:", "You:")));
+        }
+        if f.candidates.is_empty() {
+            return v;
+        }
+        v.push(tr("Voraussichtliche Stimmen:", "Likely votes:"));
+        if f.electors.is_empty() {
+            v.push(tr("  keine Wähler: das Los entscheidet.", "  no electors: the lot decides."));
+        }
+        for (k, &(e, _)) in f.electors.iter().enumerate() {
+            let line = match f.picks[k] {
+                None => tr("wählt selbst", "votes on screen"),
+                Some(c) => {
+                    let (s, office) = f.scores[k][c];
+                    let rnd = if office && self.tree_rivals.contains(&f.candidates[c]) { tr(" +0..19 Zufall", " +0..19 random") } else { String::new() };
+                    format!("{} ({s}{rnd})", self.first_name(f.candidates[c]))
+                }
+            };
+            v.push(format!("  {}: {line}", self.first_name(e)));
+        }
+        let names = |ks: &[usize]| ks.iter().map(|&k| self.first_name(f.candidates[k])).collect::<Vec<_>>().join(", ");
+        if f.leaders.len() == 1 {
+            let k = f.leaders[0];
+            v.push(format!("{} {} ({} {})", tr("Voraussichtlich:", "Likely winner:"), names(&[k]), f.votes[k], tr("Stimmen", "votes")));
+        } else {
+            v.push(format!("{} {} ({})", tr("Patt:", "Tie:"), names(&f.leaders), tr("das Los entscheidet", "the lot decides")));
+        }
+        v
+    }
+}
+
 /// The label box: one line of dark text on parchment with a 1 px border, below right of the pointer, kept on screen.
 pub(super) fn draw_tip(frame: &mut Frame, assets: &Assets, tip: &str, mouse: (i32, i32)) {
     draw_label(frame, assets, tip, (mouse.0 + 14, mouse.1 + 22));
@@ -260,15 +371,25 @@ pub(super) fn draw_tip(frame: &mut Frame, assets: &Assets, tip: &str, mouse: (i3
 
 /// A one-line parchment box with a dark border at `at` (clamped to the screen): tooltips and our map buttons.
 pub(super) fn draw_label(frame: &mut Frame, assets: &Assets, tip: &str, at: (i32, i32)) {
-    let laid = text::layout(&assets.font, &[b"$t$L".as_slice(), &super::t(tip)].concat(), &[], &[], 640, &[]);
-    let tw: i32 = laid.glyphs.iter().map(|g| assets.font.advance[g.2 as usize] as i32).sum();
-    let (w, h) = (tw + 12, text::LINE_H);
+    draw_lines(frame, assets, &[tip.to_string()], at);
+}
+
+/// Line pitch of the multi-line box: tighter than the game's 24 px rows.
+const TIP_LINE_H: i32 = 20;
+
+/// The parchment box with several lines (the office info), clamped to the screen.
+pub(super) fn draw_lines(frame: &mut Frame, assets: &Assets, lines: &[String], at: (i32, i32)) {
+    let laid: Vec<text::Laid> = lines.iter().map(|l| text::layout(&assets.font, &[b"$t$L".as_slice(), &super::t(l)].concat(), &[], &[], 640, &[])).collect();
+    let tw: i32 = laid.iter().map(|l| l.glyphs.iter().map(|g| assets.font.advance[g.2 as usize] as i32).sum::<i32>()).max().unwrap_or(0);
+    let (w, h) = (tw + 12, if lines.len() == 1 { text::LINE_H } else { TIP_LINE_H * lines.len() as i32 + 8 });
     let x = at.0.min(640 - w).max(0);
     let y = at.1.min(480 - h).max(0);
     frame.fill_rgb([x, y, w, h], [64, 40, 16]);
     frame.fill_rgb([x + 1, y + 1, w - 2, h - 2], [226, 202, 150]);
     // the layout starts at the window inset
-    text::draw(frame, &assets.font, &laid, x + 6 - text::INSET, y + 3 - text::INSET);
+    for (k, l) in laid.iter().enumerate() {
+        text::draw(frame, &assets.font, l, x + 6 - text::INSET, y + 4 - text::INSET + k as i32 * TIP_LINE_H);
+    }
 }
 
 #[cfg(test)]
@@ -356,6 +477,80 @@ mod tests {
         assets.prefs.borrow_mut().tooltips = false;
         rest(&mut g, &mut ctx, (335, 210), TIP_MS);
         assert_eq!(g.tooltip(&assets, (335, 210)), None);
+    }
+
+    /// Office info: inert while off; on, resting on a vacant Ratsherr names the appointers, the applicants and the
+    /// forecast, an occupied office its holder; every tree entry's rectangle holds its menu items.
+    #[test]
+    fn real_office_info() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, mad_sim::State::new_game(5, 3, &[mad_sim::world::HumanSetup::test(3)]).unwrap());
+        g.popups.clear();
+        g.st.year = 1601;
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let c = 3u8;
+        let v = g.st.holder(c as usize, 1).unwrap();
+        g.st.office_vacate(v);
+        let cands: Vec<usize> = g.st.computers().filter(|&x| g.st.eligibility(x, c as usize, 1) == 2).take(2).collect();
+        for &x in &cands {
+            g.st.apply_for(x, c as usize, 1, true);
+        }
+        let rest = |g: &mut Game, ctx: &mut Ctx, at: (i32, i32)| {
+            g.update(ctx, &Input { mouse: (-1, -1), ..Default::default() }, 0);
+            g.update(ctx, &Input { mouse: at, ..Default::default() }, 0);
+            g.update(ctx, &Input { mouse: at, ..Default::default() }, TIP_MS);
+        };
+        let centre = |r: [i32; 4]| (r[0] + r[2] / 2, r[1] + r[3] / 2);
+        let vacant = centre(super::super::menus::tree_entry_rect(c, 1));
+        g.open(&assets, Menu::Tree(super::super::Plot::Bribe, c, false));
+        rest(&mut g, &mut ctx, vacant);
+        assert_eq!(g.office_tip(&assets, vacant), None, "off");
+        assets.prefs.borrow_mut().office_info = true;
+        g.popups.clear();
+        g.open(&assets, Menu::Tree(super::super::Plot::Bribe, c, false));
+        // every occupied entry's items lie inside its computed rectangle
+        let w = g.popups.front().unwrap().window(&assets, &[]).unwrap();
+        let Some(Popup::Choice { acts, .. }) = g.popups.front() else { panic!() };
+        for (k, a) in acts.iter().enumerate() {
+            let Action::Open(Menu::BribeAmount(p)) = a else { continue };
+            let pr = &g.st.persons[*p as usize];
+            let r = super::super::menus::tree_entry_rect(pr.loc(), pr.idx());
+            let it = w.item_rect(k);
+            assert!(it.x >= r[0] && it.x + it.w <= r[0] + r[2] && it.y >= r[1] && it.y + it.h <= r[1] + r[3], "{r:?} {it:?}");
+        }
+        rest(&mut g, &mut ctx, vacant);
+        let lines = g.office_tip(&assets, vacant).expect("the vacant Ratsherr");
+        let all = lines.join("\n");
+        assert!(all.contains("Unbesetzt") && all.contains("Baumeister") && all.contains("Bewerber:") && all.contains("Voraussichtlich"), "{all}");
+        assert!(lines.iter().all(|l| !l.contains('/')), "{all}");
+        shot_at(&g, &assets, "office_info_vacant", vacant);
+        let bm = centre(super::super::menus::tree_entry_rect(c, 6));
+        rest(&mut g, &mut ctx, bm);
+        let lines = g.office_tip(&assets, bm).expect("the Bürgermeister");
+        assert!(lines.iter().any(|l| l.starts_with("Inhaber:")) && lines.iter().any(|l| l.contains("Ratsherr")), "{lines:?}");
+        shot_at(&g, &assets, "office_info_holder", bm);
+        // the county tree: the Vogt is drawn by lot; a vacant Bischof names the Diakon as privileged candidate
+        g.popups.clear();
+        g.open(&assets, Menu::Tree(super::super::Plot::Bribe, 10, false));
+        let vogt = centre(super::super::menus::tree_entry_rect(10, 7));
+        rest(&mut g, &mut ctx, vogt);
+        assert!(g.office_tip(&assets, vogt).unwrap().iter().any(|l| l.contains("Los")));
+        if let Some(b) = g.st.holder(10, 12) {
+            g.st.office_vacate(b);
+        }
+        g.popups.clear();
+        g.open(&assets, Menu::Tree(super::super::Plot::Bribe, 10, true));
+        let bishop = centre(super::super::menus::tree_entry_rect(10, 12));
+        rest(&mut g, &mut ctx, bishop);
+        let lines = g.office_tip(&assets, bishop).unwrap();
+        assert!(lines.iter().any(|l| l.starts_with("Privilegierter Kandidat:")) && lines.iter().any(|l| l.contains("Bewerber: keine")), "{lines:?}");
+        shot_at(&g, &assets, "office_info_bishop", bishop);
+        // the Extras page with the new row
+        g.popups.clear();
+        g.open(&assets, Menu::Extras(1));
+        shot_at(&g, &assets, "extras_office_info", (630, 470));
+        assets.prefs.borrow_mut().office_info = false;
     }
 
     /// Shortcuts: inert while off; on, the Kontor keys open the places, Esc leaves them, a digit picks a menu line,
