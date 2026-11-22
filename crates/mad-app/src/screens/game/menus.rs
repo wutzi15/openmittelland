@@ -612,7 +612,7 @@ impl Game {
                     let (rw, rm) = ratio(g).split_once(':').map(|(a, b)| (a.parse().unwrap_or(1), b.parse().unwrap_or(1))).unwrap_or((1, 1));
                     let worker = |n: i32| if n == 1 { tr("Arbeiter", "worker") } else { tr("Arbeiter", "workers") };
                     f.txt(&format!("{}: {} {rw} {} {} {rm} {}", self.good(g as u8), tr("am besten", "best"), worker(rw), tr("mit", "with"), means(rm))).raw(b"$N");
-                    f.txt(&format!("{}: {w} {} {} {opt} {}", tr("Euer Auftrag", "Your order"), worker(w), tr("arbeiten am besten mit", "work best with"), means(opt as i32))).raw(b"$N");
+                    f.txt(&format!("{}: {w} {} {} {opt} {}", tr("Euer Auftrag", "Your order"), worker(w), tr("arbeiten am besten mit", "work best with"), means(opt))).raw(b"$N");
                     if w > 30 {
                         f.txt(&tr("Über 30 Arbeiter (Grenze 30..39, zufällig) zählt der Rest nur halb.", "Above 30 workers (limit 30..39, random) the rest counts half.")).raw(b"$N");
                     }
