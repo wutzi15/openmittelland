@@ -69,7 +69,7 @@ fn pref_tip(k: Pref) -> (&'static str, &'static str) {
         Pref::SeedChoice => ("Spielnummer wählen\nNeues Spiel: Zufall, Tagesspiel oder eine\nNummer. Gleiche Nummer, gleiche Welt.", "Choose game number\nNew game: random, daily game or a number.\nSame number, same world."),
         Pref::SkipTrial => ("Szenen überspringen\nLeertaste überspringt Gericht, Begräbnis,\nWahlen und Entlassungen. Gleiches Ergebnis.", "Skip scenes\nSpace skips court, funeral, elections and\ndismissals. The outcome is the same."),
         Pref::SkipLot => ("Posten überspringen\nTab lässt einen Auktionsposten ohne dich\nlaufen, ohne Wartezeit.", "Skip auction lot\nTab runs an auction lot without you,\nwith no waits."),
-        Pref::Warnings => ("Schuldenwarnung\nWarnt zu Rundenbeginn vor Pfändung,\nfälligen Krediten und Ähnlichem.", "Warnings\nWarns at the turn start of seizure,\nloans due and the like."),
+        Pref::Warnings => ("Schuldenwarnung\nWarnt zu Beginn und am Ende der Runde vor\nPfändung, fälligen Krediten und Ähnlichem.", "Warnings\nWarns at the start and end of the turn of\nseizure, loans due and the like."),
         Pref::ProductionHelp => ("Produktionshilfe\nTaste H: bestes Verhältnis, nötige Mittel\nund erwarteter Ertrag je Ware.", "Production help\nKey H: best ratio, means needed and\nexpected yield per good."),
         Pref::Ledger => ("Bilanz\nTaste B: Vermögen, Bargeld und Ergebnis\nder Niederlassungen über die Jahre.", "Ledger\nKey B: net worth, cash and branch\nresults over the years."),
         Pref::PriceTable => ("Preistabelle\nTaste P: alle Waren in allen Städten.", "Price table\nKey P: every good in every city."),

@@ -2394,6 +2394,21 @@ impl Game {
     /// Ours (`prefs.warnings`): the turn-start warnings of human `h` as one window, none when nothing is due.
     /// No RNG: the debt outlook runs on a copy, the order costs are the order book's forecast.
     fn warnings(&self, assets: &Assets, h: usize) -> Option<Popup> {
+        let lines = self.warning_lines(assets, h);
+        if lines.is_empty() {
+            return None;
+        }
+        let pr = assets.prefs.borrow();
+        let mut f = Form::new(b"$C^ ");
+        f.txt(pr.tr("Warnung", "Warning")).raw(b" _$Z$L");
+        for l in lines {
+            f.txt(&l).raw(b"$N$Z");
+        }
+        Some(f.popup(assets, 100, 440, None))
+    }
+
+    /// Ours (`prefs.warnings`): seizure ahead, loans due, orders over the cash.
+    fn warning_lines(&self, assets: &Assets, h: usize) -> Vec<String> {
         let pr = assets.prefs.borrow();
         let mut lines: Vec<String> = vec![];
         if let Some((debt, last)) = self.st.debt_outlook(h) {
@@ -2414,15 +2429,7 @@ impl Game {
         if cost > cash {
             lines.push(pr.tr(&format!("Die bestätigten Aufträge kosten {} Taler, in der Kasse sind {}.", dotted(cost), dotted(cash)), &format!("The confirmed orders cost {} Taler, the cash is {}.", dotted(cost), dotted(cash))).to_string());
         }
-        if lines.is_empty() {
-            return None;
-        }
-        let mut f = Form::new(b"$C^ ");
-        f.txt(pr.tr("Warnung", "Warning")).raw(b" _$Z$L");
-        for l in lines {
-            f.txt(&l).raw(b"$N$Z");
-        }
-        Some(f.popup(assets, 100, 440, None))
+        lines
     }
 
     /// The election screen's content (rules-15 §3.4, texts rules-12 §3.7 steps 1..5) from the finished election.
@@ -4364,6 +4371,22 @@ impl Game {
     }
 
     fn end_turn_dialog(&self, assets: &Assets) -> Option<Popup> {
+        // ours (`prefs.warnings`): the turn-start warnings again, since buying or ordering during the turn can cause them
+        if let Some(h) = self.me()
+            && assets.prefs.borrow().warnings
+            && let lines = self.warning_lines(assets, h)
+            && !lines.is_empty()
+        {
+            let pr = assets.prefs.borrow();
+            let mut f = Form::new(b"$C^ ");
+            f.txt(pr.tr("Warnung", "Warning")).raw(b" _$Z$L");
+            for l in lines {
+                f.txt(&l).raw(b"$N$Z");
+            }
+            f.raw(b"$C").txt(pr.tr("Runde trotzdem beenden?", "End the turn anyway?")).raw(b"$N$N%m  %m");
+            f.bind(assets.text(addr::JA), Action::EndTurn).bind(assets.text(addr::NEIN), Action::Close);
+            return Some(f.popup(assets, 100, 440, None));
+        }
         if self.cfg_end & 0x20 != 0 {
             Some(Self::yes_no(assets, assets.text(addr::END_TURN), [160, 160, 320, 160], Action::EndTurn))
         } else if self.cfg_end & 0x10 != 0 && self.unvisited {
@@ -7928,6 +7951,11 @@ pub(crate) mod tests {
         let w = g.warnings(&assets, h).expect("warnings");
         g.popups.push_back(w);
         shot(&g, &assets, "warnings");
+        g.popups.clear();
+        // the same warnings ask before the turn ends (a branch bought during the turn; playtest)
+        let Some(p @ Popup::Choice { .. }) = g.end_turn_dialog(&assets) else { panic!("the end-turn warning") };
+        g.popups.push_back(p);
+        shot(&g, &assets, "end_turn_warning");
         g.popups.clear();
         // production help on the branch screen
         g.st.persons[h].set_cash_raw(750);

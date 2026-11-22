@@ -45,7 +45,7 @@ OpenMittelland adds optional features the original does not have. All are off by
 | | Spielnummer wählen | | choose the game number or play the daily game |
 | | Szenen überspringen | Space | skip court, funeral, election and dismissal scenes |
 | | Posten überspringen | Tab | let an auction lot run without you, at once |
-| Hilfen und Hausregeln | Schuldenwarnung | | warnings at the start of your turn |
+| Hilfen und Hausregeln | Schuldenwarnung | | warnings at the start and the end of your turn |
 | | Produktionshilfe | `H` | production advice on the branch screen |
 | | Bilanz | `B` | your yearly accounts |
 | | Preistabelle | `P` | all prices in all cities |
@@ -75,7 +75,7 @@ The keys work in the Kontor (some also on the Handel map or the branch screen) a
 
 #### Helpers
 
-- **Schuldenwarnung.** At the start of your turn a "Warnung" window appears if your debts will trigger a seizure at the year end (and says so when only one branch is left, which can then be lost), if a loan falls due next year, or if your confirmed orders cost more than your cash.
+- **Schuldenwarnung.** At the start of your turn a "Warnung" window appears if your debts will trigger a seizure at the year end (and says so when only one branch is left, which can then be lost), if a loan falls due next year, or if your confirmed orders cost more than your cash. The same warnings come again when you end the turn, with "Runde trotzdem beenden?", since buying a branch or confirming orders during the turn can cause them: with too little cash left for the orders, the year-end debt check can seize goods and even a branch.
 - **Produktionshilfe.** On the branch screen press `H` or click "Hilfe (H)". For the branch's first production order it shows: the best ratio of workers to means for that good (for example Korn 5:1, Fisch 3:1), how many means your workers can use, the expected yield at average weather times the local price, the cost and the profit. Each year a limit between 30 and 39 is drawn; every worker above it adds only half as much. Below that, a table lists every good of the city with its ratio, means price and local price.
 - **Bilanz.** `B` in the Kontor. Page one: net worth and cash per year with bars, last ten years. Page two ("Niederlassungen"): per city, the sales of the shipments from that branch minus its wages, means and transport. Not counted per branch: goods sold directly on the branch screen, tolls and director fees. A year appears at the start of the next turn. The accounts are kept while the game runs and start empty after loading.
 - **Preistabelle.** `P` in the Kontor: all 15 goods in all ten cities; the highest price of each good (best to sell) is in gold, the lowest (best to buy) in red.
