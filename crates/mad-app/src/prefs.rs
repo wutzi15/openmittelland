@@ -44,6 +44,12 @@ pub struct Prefs {
     pub ledger: bool,
     /// "Preise" table: every good in every city (Kontor key P).
     pub price_table: bool,
+    /// "Chronik" window: every report line of this session, newest first (Kontor key L).
+    pub event_log: bool,
+    /// Order templates on the branch screen: key C copies the four slots, key E pastes them.
+    pub order_copy: bool,
+    /// A Ja/Nein question before irreversible actions the original runs at once (bribe, blackmail, spies, …).
+    pub confirmations: bool,
 }
 
 impl Default for Prefs {
@@ -66,6 +72,9 @@ impl Default for Prefs {
             sell_all: false,
             ledger: false,
             price_table: false,
+            event_log: false,
+            order_copy: false,
+            confirmations: false,
         }
     }
 }
@@ -95,6 +104,9 @@ impl Prefs {
                 "sell_all" => p.sell_all = b,
                 "ledger" => p.ledger = b,
                 "price_table" => p.price_table = b,
+                "event_log" => p.event_log = b,
+                "order_copy" => p.order_copy = b,
+                "confirmations" => p.confirmations = b,
                 _ => {}
             }
         }
@@ -104,7 +116,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -122,6 +134,9 @@ impl Prefs {
             b(self.sell_all),
             b(self.ledger),
             b(self.price_table),
+            b(self.event_log),
+            b(self.order_copy),
+            b(self.confirmations),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -145,7 +160,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();

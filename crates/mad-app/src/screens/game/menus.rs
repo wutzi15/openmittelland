@@ -478,6 +478,9 @@ impl Game {
                         (tr("Bilanz (Taste B):", "Ledger (key B):"), on(p.ledger), Ledger),
                         (tr("Preistabelle (Taste P):", "Price table (key P):"), on(p.price_table), PriceTable),
                         (tr("Alles verkaufen:", "Sell all:"), on(p.sell_all), SellAll),
+                        (tr("Chronik (Taste L):", "Log (key L):"), on(p.event_log), EventLog),
+                        (tr("Aufträge kopieren (C, E):", "Copy orders (C, E):"), on(p.order_copy), OrderCopy),
+                        (tr("Sicherheitsfragen:", "Confirmations:"), on(p.confirmations), Confirmations),
                         (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
                         (tr("Bis 255 Arbeiter:", "Up to 255 workers:"), on(p.more_workers), MoreWorkers),
                     ]
@@ -495,13 +498,16 @@ impl Game {
                     f.raw(b"$C").txt(&format!("{} {seed}", tr("Spielnummer", "Game number"))).raw(b"$N");
                 }
                 // the two windows' openers, each only with its option on
-                if page == 1 && (p.ledger || p.price_table) {
+                if page == 1 && (p.ledger || p.price_table || p.event_log) {
                     f.raw(b"$C");
                     if p.ledger {
                         f.item(t(&tr("Bilanz...", "Ledger...")), Action::Open(Menu::Ledger(0))).raw(b"  ");
                     }
                     if p.price_table {
-                        f.item(t(&tr("Preise...", "Prices...")), Action::Open(Menu::Prices));
+                        f.item(t(&tr("Preise...", "Prices...")), Action::Open(Menu::Prices)).raw(b"  ");
+                    }
+                    if p.event_log {
+                        f.item(t(&tr("Chronik...", "Log...")), Action::Open(Menu::Log(0)));
                     }
                     f.raw(b"$N");
                 }
@@ -594,6 +600,31 @@ impl Game {
                 self.popups.push_back(f.popup_at([60, 240 - hh.min(440) / 2, 520, hh.min(440)]).with_menu(m));
                 return;
             }
+            Menu::Log(page) => {
+                // ours (`prefs.event_log`): the session's report lines, newest first, paged by printed height
+                let pr = assets.prefs.borrow().clone();
+                let tr = |de: &'static str, en: &'static str| pr.tr(de, en).to_string();
+                let pages = self.log_pages(assets);
+                let page = (page as usize).min(pages.len().saturating_sub(1));
+                f.raw(b"$Z$C^ ").txt(&tr("Chronik", "Log")).raw(b" _$Z$L");
+                match pages.get(page) {
+                    None => drop(f.raw(b"$N$C").txt(&tr("Noch nichts geschehen.", "Nothing happened yet.")).raw(b"$N")),
+                    Some(r) => {
+                        for (year, line) in self.log.iter().rev().skip(r.start).take(r.len()) {
+                            f.txt(&format!("{year}: {line}")).raw(b"$N");
+                        }
+                    }
+                }
+                f.raw(b"$Z$C");
+                if page > 0 {
+                    f.item(t(&tr("Neuere", "Newer")), Action::Open(Menu::Log(page as u16 - 1))).raw(b"    ");
+                }
+                if page + 1 < pages.len() {
+                    f.item(t(&tr("Frühere", "Older")), Action::Open(Menu::Log(page as u16 + 1)));
+                }
+                self.popups.push_back(f.popup_at([40, 30, 560, 420]).with_menu(m));
+                return;
+            }
             Menu::Prices => {
                 // ours (`prefs.price_table`): every good in every city; the best price of a good in gold
                 let pr = assets.prefs.borrow().clone();
@@ -624,10 +655,20 @@ impl Game {
                 // ours (`prefs.shortcuts`): the key list, key ?
                 let pr = assets.prefs.borrow().clone();
                 f.raw(b"$Z$C^ ").txt(pr.tr("Tasten", "Keys")).raw(b" _$Z");
-                for (key, what) in super::tips::key_list(&pr) {
-                    f.raw(b"$|$L").txt(&key).raw(b"$E$|$150[$L").txt(&what).raw(b"$E$|$N");
+                // two columns: the Kontor places left, the general keys and the Extras' keys right
+                let list = super::tips::key_list(&pr);
+                let (places, rest) = list.split_at(super::tips::KEYS.len().min(list.len()));
+                for k in 0..places.len().max(rest.len()) {
+                    if let Some((key, what)) = places.get(k) {
+                        f.raw(b"$|$L").txt(key).raw(b"$E$|$36[$L").txt(what).raw(b"$E");
+                    }
+                    if let Some((key, what)) = rest.get(k) {
+                        f.raw(b"$|$300[$L").txt(key).raw(b"$E$|$378[$L").txt(what).raw(b"$E");
+                    }
+                    f.raw(b"$|$N");
                 }
-                self.popups.push_back(f.popup_at([100, 20, 440, 440]).with_menu(m));
+                let hh = ((places.len().max(rest.len()) as i32 + 2) * 24 + 60 + 39) / 40 * 40;
+                self.popups.push_back(f.popup_at([10, 240 - hh.min(460) / 2, 620, hh.min(460)]).with_menu(m));
                 return;
             }
             Menu::Music => {

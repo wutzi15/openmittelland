@@ -505,6 +505,8 @@ enum Menu {
     Prices,
     /// Ours (`prefs.shortcuts`): the key list.
     Keys,
+    /// Ours (`prefs.event_log`): the session's report lines, newest first, by page (Kontor key L).
+    Log(u16),
     /// Ours (`prefs.production_help`): the production help of branch `b` (key H on the branch screen).
     ProdHelp(usize),
     /// The player's privileges (rules-04b §4.1).
@@ -634,6 +636,9 @@ enum Pref {
     SellAll,
     Ledger,
     PriceTable,
+    EventLog,
+    OrderCopy,
+    Confirmations,
 }
 
 #[derive(Clone, Debug)]
@@ -714,6 +719,8 @@ enum Action {
     YesNo(Vec<u8>, [i32; 4], Box<Action>),
     /// Same with ready text (substituted) and the box rectangle.
     ConfirmText(Vec<u8>, [i32; 4], Box<Action>),
+    /// Ours (pref `confirmations`): the action after its safety question was answered with Ja.
+    Sure(Box<Action>),
     /// Sell stock locally (spec 04 §5.1.2.1): good (0xFF = everything), quantity (0 = all of it).
     Sell(usize, u8, u16),
     Nothing,
@@ -1058,6 +1065,10 @@ pub struct Game {
     score_bars: Vec<i32>,
     /// Ours (`prefs.ledger`): one entry per finished year of a human, in order; empty after a load.
     ledger: Vec<LedgerYear>,
+    /// Ours (`prefs.event_log`): (year, line) of every report line shown while the option was on; empty after a load.
+    log: Vec<(u16, String)>,
+    /// Ours (`prefs.order_copy`): the four order slots copied from a branch screen (key C).
+    clip: Option<[[u8; 8]; 4]>,
     /// `BranchCosts` of the running turn end, folded into the ledger at the next turn start.
     branch_costs: Vec<(u8, i32)>,
     /// Fanfare drawn for the last title charter (rules-27 §1).
@@ -1223,6 +1234,30 @@ fn raw_line(src: &[u8]) -> String {
     std::iter::once(RAW).chain(src.iter().map(|&b| b as char)).collect()
 }
 
+/// Ours: the Chronik window's text width and lines per page (rect [40, 30, 560, 420], 24 px lines, the title and
+/// the page items off).
+const LOG_WIDTH: usize = 530;
+const LOG_LINES: usize = 13;
+
+/// Greedy pages over entries of `costs` lines each: a page takes entries while they fit in `cap` lines, at least one.
+fn pack_pages(costs: impl Iterator<Item = usize>, cap: usize) -> Vec<std::ops::Range<usize>> {
+    let mut pages: Vec<std::ops::Range<usize>> = vec![];
+    let mut used = 0;
+    for (i, c) in costs.enumerate() {
+        match pages.last_mut() {
+            Some(p) if used + c <= cap => {
+                p.end = i + 1;
+                used += c;
+            }
+            _ => {
+                pages.push(i..i + 1);
+                used = c;
+            }
+        }
+    }
+    pages
+}
+
 /// The turn-end report window for `lines` (answered menus keep their gem items).
 fn report_window(assets: &Assets, lines: &[String]) -> Window {
     let n = lines.iter().filter(|l| l.starts_with(RAW)).map(|l| l.matches("%m").count()).sum();
@@ -1306,6 +1341,8 @@ impl Game {
             trans_pic: (Menu::Quit, 0),
             score_bars: vec![],
             ledger: vec![],
+            log: vec![],
+            clip: None,
             branch_costs: vec![],
             award_song: 7,
             herald_song: None,
@@ -1575,6 +1612,34 @@ impl Game {
     /// turn start brings "Nächster Spieler" (if enabled) and, after the first year, the Erträge
     /// spread built from the turn-start production/sales events. A year end autosaves slot 5.
     fn report(&mut self, assets: &Assets, ev: Vec<SimEvent>, asked: Vec<String>) {
+        let before: Vec<usize> = self.popups.iter().filter(|p| matches!(p, Popup::Report(_) | Popup::YearReport(_))).map(Self::report_key).collect();
+        self.report_screens(assets, ev, asked);
+        if !assets.prefs.borrow().event_log {
+            return;
+        }
+        // ours: every new report window's lines go to the Chronik (a continued window only with its new lines;
+        // the answered menus' `RAW` lines are not events)
+        let year = self.st.year;
+        let mut new = vec![];
+        for p in &self.popups {
+            if let Popup::Report(l) | Popup::YearReport(l) = p
+                && !before.contains(&Self::report_key(p))
+            {
+                let skip = self.continued.filter(|c| c.0 == Self::report_key(p)).map_or(0, |c| c.1);
+                new.extend(l.iter().skip(skip).filter(|l| !l.starts_with(RAW)).map(|l| (year, l.clone())));
+            }
+        }
+        self.log.extend(new);
+    }
+
+    /// Ours (`prefs.event_log`): the Chronik's pages, newest entry first; a page holds `LOG_LINES` printed lines, an
+    /// entry as many as its width needs in the window.
+    fn log_pages(&self, assets: &Assets) -> Vec<std::ops::Range<usize>> {
+        let width = |s: &str| t(s).iter().map(|&b| assets.font.advance[b as usize] as usize).sum::<usize>();
+        pack_pages(self.log.iter().rev().map(|(y, l)| width(&format!("{y}: {l}")).div_ceil(LOG_WIDTH).max(1)), LOG_LINES)
+    }
+
+    fn report_screens(&mut self, assets: &Assets, ev: Vec<SimEvent>, asked: Vec<String>) {
         let n0 = self.popups.len();
         if ev.iter().any(|e| matches!(e, SimEvent::TurnStart { .. })) {
             self.unvisited = true;
@@ -4214,7 +4279,40 @@ impl Game {
         self.act(a, ctx)
     }
 
+    /// Ours (pref `confirmations`): the Ja/Nein question before an action the original runs at once. Selling a
+    /// branch or residence and hiring a saboteur already ask in the original; a human castle buyer is asked by the sim.
+    fn safety(&self, assets: &Assets, a: &Action) -> Option<Vec<u8>> {
+        let p = assets.prefs.borrow();
+        if !p.confirmations {
+            return None;
+        }
+        let (de, en) = match a {
+            Action::Sim(Command::Bribe { .. }, _) => ("Wirklich bestechen?", "Really bribe?"),
+            Action::Sim(Command::Denounce { .. }, _) => ("Wirklich anschwärzen?", "Really denounce?"),
+            Action::Sim(Command::SellCastle { .. }, _) => ("Wirklich verkaufen?", "Really sell?"),
+            Action::Blackmail(_) => ("Wirklich erpressen?", "Really blackmail?"),
+            Action::Dismiss(..) => ("Söldner wirklich entlassen?", "Really dismiss the troops?"),
+            Action::Spied(target, _) if self.me().is_some_and(|me| self.st.spy_contract(me, *target as usize).is_none()) => ("Wirklich Spione anheuern?", "Really hire spies?"),
+            _ => return None,
+        };
+        Some([&b"$C"[..], &t(p.tr(de, en)), b"$N$N%m  %m"].concat())
+    }
+
     fn act(&mut self, a: Action, ctx: &mut Ctx) -> Next {
+        // ours (pref `confirmations`): the question sits over the window the action came from; Ja runs the action
+        // as if clicked there, Nein closes the question only
+        if let Action::Sure(a) = a {
+            self.popups.pop_front();
+            return self.act_now(*a, ctx);
+        }
+        if let Some(q) = self.safety(ctx.assets, &a) {
+            self.popups.push_front(Self::yes_no(ctx.assets, q, [140, 160, 360, 160], Action::Sure(Box::new(a))));
+            return Next::Stay;
+        }
+        self.act_now(a, ctx)
+    }
+
+    fn act_now(&mut self, a: Action, ctx: &mut Ctx) -> Next {
         if let Action::Select(k) = a {
             // the list stays open; the bullets show the selection
             self.sel = if self.sel == Some(k) { None } else { Some(k) };
@@ -4332,6 +4430,7 @@ impl Game {
                 self.popups.push_front(f.popup_at(rect));
             }
             Action::Confirm(a, yes) => self.popups.push_front(Self::yes_no(ctx.assets, ctx.assets.text(a), [160, 160, 320, 160], *yes)),
+            Action::Sure(a) => return self.act_now(*a, ctx),
             Action::YesNo(s, rect, yes) => self.popups.push_front(Self::yes_no(ctx.assets, s, rect, *yes)),
             Action::Sell(b, good, qty) => {
                 let qty = if qty == 0 && good != 0xFF { self.st.props[b].stock(good as usize) } else { qty };
@@ -4524,6 +4623,9 @@ impl Game {
                             Pref::SellAll => p.sell_all ^= true,
                             Pref::Ledger => p.ledger ^= true,
                             Pref::PriceTable => p.price_table ^= true,
+                            Pref::EventLog => p.event_log ^= true,
+                            Pref::OrderCopy => p.order_copy ^= true,
+                            Pref::Confirmations => p.confirmations ^= true,
                         }
                         self.st.house = p.house();
                         if let Err(e) = p.save(&ctx.assets.user_saves) {
@@ -4738,11 +4840,28 @@ impl Game {
             // ours: the production help of the branch screen (key H) and the Kontor keys of the ledger and the
             // price table, each behind its option
             (Event::Key(Key::Char(c)), Some(b)) if c.eq_ignore_ascii_case(&b'h') && ctx.assets.prefs.borrow().production_help => self.open(ctx.assets, Menu::ProdHelp(b)),
+            // ours (pref `order_copy`): C copies the branch's four order slots, E writes them into this branch through
+            // the sim, which sets each slot's status
+            (Event::Key(Key::Char(c)), Some(b)) if matches!(c.to_ascii_lowercase(), b'c' | b'e') && ctx.assets.prefs.borrow().order_copy => {
+                let msg = if c.eq_ignore_ascii_case(&b'c') {
+                    self.clip = Some(std::array::from_fn(|k| self.st.props[b].order(k)));
+                    ctx.assets.prefs.borrow().tr("Aufträge kopiert.", "Orders copied.")
+                } else if let Some(clip) = self.clip {
+                    for (k, order) in clip.into_iter().enumerate() {
+                        self.sim(ctx.assets, Command::SetOrder { branch: b as u8, slot: k as u8, order });
+                    }
+                    return Next::Stay;
+                } else {
+                    ctx.assets.prefs.borrow().tr("Noch nichts kopiert.", "Nothing copied yet.")
+                };
+                self.popups.push_front(Form::new(&[&b"$C"[..], &t(msg)].concat()).popup(ctx.assets, 160, 320, None));
+            }
             (Event::Key(Key::Char(c)), None) if self.room.is_none() && self.me().is_some() => {
-                let (ledger, prices) = { let p = ctx.assets.prefs.borrow(); (p.ledger, p.price_table) };
+                let (ledger, prices, log) = { let p = ctx.assets.prefs.borrow(); (p.ledger, p.price_table, p.event_log) };
                 match c.to_ascii_lowercase() {
                     b'b' if ledger => self.open(ctx.assets, Menu::Ledger(0)),
                     b'p' if prices => self.open(ctx.assets, Menu::Prices),
+                    b'l' if log => self.open(ctx.assets, Menu::Log(0)),
                     _ => {}
                 }
             }
@@ -7520,6 +7639,96 @@ pub(crate) mod tests {
         assert_eq!(g.st.persons[h].cash(), by_hand.persons[h].cash());
         assert_eq!(g.st.rng, by_hand.rng);
         assets.prefs.borrow_mut().sell_all = false;
+    }
+
+    /// Ours: the Chronik pages pack entries of varying height greedily, one entry at least per page.
+    #[test]
+    fn log_pages_pack() {
+        assert_eq!(pack_pages([1, 2, 3, 1, 5, 1].into_iter(), 4), vec![0..2, 2..4, 4..5, 5..6]);
+        assert_eq!(pack_pages([9].into_iter(), 4), vec![0..1]);
+        assert!(pack_pages(std::iter::empty(), 4).is_empty());
+    }
+
+    /// Ours (prefs `event_log`, `order_copy`, `confirmations`): off, nothing is collected and the keys and actions
+    /// behave as before; on, the Chronik holds the report lines of turn-end and year-end windows (key L shows them
+    /// newest first), C/E copy a branch's orders through the sim, and a plot asks Ja/Nein first.
+    #[test]
+    fn real_extras_log_orders_confirm() {
+        let Some(assets) = test_assets() else { return };
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let mut g = Game::start(&assets, State::new_game(3, 3, &[mad_sim::world::HumanSetup::test(3)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap();
+        let key = |g: &mut Game, ctx: &mut Ctx, c: u8| g.update(ctx, &Input { events: vec![Event::Key(Key::Char(c))], ..Default::default() }, 0);
+        let fine = |n: i32| SimEvent::Fine { person: h as u8, amount: n };
+        // off: no log, no key
+        g.report(&assets, vec![fine(100)], vec![]);
+        g.popups.clear();
+        key(&mut g, &mut ctx, b'l');
+        assert!(g.log.is_empty() && g.popups.is_empty());
+        {
+            let mut p = assets.prefs.borrow_mut();
+            (p.event_log, p.order_copy, p.confirmations) = (true, true, true);
+        }
+        // a turn-end window and a year-end window, then a continued window: only its new lines are logged
+        g.report(&assets, vec![fine(120), SimEvent::YearEnd { year: 1600 }, fine(130)], vec![]);
+        g.popups.clear();
+        g.window = vec!["Ihr zahlt Eure jährliche Geldstrafe von 120 Talern.".into()];
+        g.report(&assets, vec![fine(140)], vec![]);
+        g.popups.clear();
+        let amounts: Vec<String> = g.log.iter().map(|(_, l)| l.split(" von ").nth(1).unwrap_or(l).to_string()).collect();
+        assert_eq!(amounts, ["120 Talern.", "130 Talern.", "140 Talern."], "{:?}", g.log);
+        for n in 0..30 {
+            g.log.push((1601 + n / 10, format!("Eintrag {n}: {}", "lange Zeile ".repeat(n as usize % 4 + 1))));
+        }
+        key(&mut g, &mut ctx, b'l');
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Log(0)), .. })));
+        shot(&g, &assets, "log0");
+        let pages = g.log_pages(&assets);
+        assert!(pages.len() > 1 && pages[0].start == 0 && pages.last().unwrap().end == g.log.len());
+        g.popups.clear();
+        g.open(&assets, Menu::Log(1));
+        shot(&g, &assets, "log1");
+        g.popups.clear();
+        // orders: the uncle's production order copied, pasted into another branch (or the same one, cleared)
+        let b = g.st.branch_at(h, 3).unwrap();
+        let b2 = g.st.props_of(h, mad_sim::state::KIND_BRANCH).find(|&p| p != b).unwrap_or(b);
+        g.branch = Some(b);
+        key(&mut g, &mut ctx, b'c');
+        let clip = g.clip.expect("copied");
+        assert_eq!(clip[0][0], 1);
+        g.popups.clear();
+        if b2 == b {
+            g.sim(&assets, Command::SetOrder { branch: b as u8, slot: 0, order: [0; 8] });
+        }
+        g.branch = Some(b2);
+        key(&mut g, &mut ctx, b'E');
+        let pasted = g.st.props[b2].order(0);
+        assert_eq!(pasted[..7], clip[0][..7]);
+        assert!(matches!(pasted[7], mad_sim::economy::ST_POSSIBLE | mad_sim::economy::ST_IMPOSSIBLE), "the sim sets the status");
+        shot(&g, &assets, "orders_pasted");
+        g.branch = None;
+        g.popups.clear();
+        // confirmations: the bribe waits for Ja; Nein leaves the cash alone
+        let v = (0..mad_sim::state::PERSONS).find(|&i| g.st.persons[i].used() && !g.st.persons[i].human() && g.st.persons[i].has_office()).unwrap() as u8;
+        g.st.persons[h].set_cash_raw(0);
+        g.act(Action::Sim(Command::Bribe { target: v, amount: 0 }, None), &mut ctx);
+        let Some(Popup::Choice { src, acts, .. }) = g.popups.front() else { panic!("question") };
+        assert!(String::from_utf8_lossy(src).contains("bestechen") && matches!(acts[0], Action::Sure(_)) && g.popups.len() == 1);
+        shot(&g, &assets, "confirm_bribe");
+        let yes = acts[0].clone();
+        g.act(Action::Close, &mut ctx);
+        assert!(g.popups.is_empty());
+        g.act(yes, &mut ctx);
+        assert!(g.popups.iter().any(|p| matches!(p, Popup::Choice { src, .. } if String::from_utf8_lossy(src).contains("Geldbeutel"))), "the bribe ran");
+        g.popups.clear();
+        {
+            let mut p = assets.prefs.borrow_mut();
+            (p.event_log, p.order_copy, p.confirmations) = (false, false, false);
+        }
+        g.act(Action::Sim(Command::Bribe { target: v, amount: 0 }, None), &mut ctx);
+        assert!(g.popups.iter().any(|p| matches!(p, Popup::Choice { src, .. } if String::from_utf8_lossy(src).contains("Geldbeutel"))), "off: no question");
     }
 
     /// Live A/B screens of the 1600 capture (player "anna", 57 Taler, no office): Nächster Spieler, Kontor 1601, bill.

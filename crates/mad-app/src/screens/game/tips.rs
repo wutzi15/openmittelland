@@ -18,14 +18,14 @@ pub(super) const TIP_MS: u32 = 600;
 
 /// Where a Kontor key goes.
 #[derive(Clone, Copy)]
-enum Go {
+pub(super) enum Go {
     Spot(Spot),
     Banner,
     Kreditbuch,
 }
 
 /// Kontor keys (lower case) and what they open. B, P, V, U, H, L, C, E and Tab belong to other Extras.
-const KEYS: [(u8, Go, (&str, &str)); 9] = [
+pub(super) const KEYS: [(u8, Go, (&str, &str)); 9] = [
     (b'm', Go::Spot(Spot::Handel), ("Handelskarte", "Trade map")),
     (b's', Go::Spot(Spot::Schreibstube), ("Schreibstube", "Scriptorium")),
     (b'r', Go::Spot(Spot::Spielstand), ("Spielstand (Rangliste)", "Standings")),
@@ -41,12 +41,13 @@ const KEYS: [(u8, Go, (&str, &str)); 9] = [
 pub(super) fn key_list(p: &Prefs) -> Vec<(String, String)> {
     let tr = |de: &'static str, en: &'static str| p.tr(de, en).to_string();
     let mut v: Vec<(String, String)> = KEYS.iter().map(|&(k, _, (de, en))| ((k as char).to_ascii_uppercase().to_string(), tr(de, en))).collect();
-    v.push((tr("Leer, Enter", "Space, Enter"), tr("Runde beenden", "End the turn")));
-    v.push(("Esc".into(), tr("Fenster schließen, Raum verlassen", "Close window, leave room")));
-    v.push(("1 - 9".into(), tr("Zeile eines Menüs wählen", "Pick a menu line")));
+    v.push((tr("Leer", "Space"), tr("Runde beenden", "End the turn")));
+    v.push(("Enter".into(), tr("Runde beenden", "End the turn")));
+    v.push(("Esc".into(), tr("Schließen, verlassen", "Close, leave")));
+    v.push(("1 - 9".into(), tr("Menüzeile wählen", "Pick a menu line")));
     v.push(("?".into(), tr("Diese Liste", "This list")));
     v.push(("Tab".into(), tr("Extras", "Extras")));
-    for (on, k, de, en) in [(p.ledger, "B", "Bilanz", "Ledger"), (p.price_table, "P", "Preistabelle", "Price table"), (p.sell_all, "V", "Alles verkaufen", "Sell all"), (p.undo, "U", "Letzte Runde zurück", "Undo the last turn"), (p.production_help, "H", "Produktionshilfe (Niederlassung)", "Production help (branch)")] {
+    for (on, k, de, en) in [(p.ledger, "B", "Bilanz", "Ledger"), (p.price_table, "P", "Preistabelle", "Price table"), (p.sell_all, "V", "Alles verkaufen", "Sell all"), (p.undo, "U", "Runde zurück", "Undo turn"), (p.production_help, "H", "Produktionshilfe", "Production help"), (p.event_log, "L", "Chronik", "Event log"), (p.order_copy, "C", "Aufträge kopieren", "Copy orders"), (p.order_copy, "E", "Aufträge einfügen", "Paste orders")] {
         if on {
             v.push((k.into(), tr(de, en)));
         }
@@ -281,7 +282,7 @@ mod tests {
             assert!(KEYS[i + 1..].iter().all(|o| o.0 != k.0));
         }
         let p = Prefs { shortcuts: true, ledger: true, ..Prefs::default() };
-        assert_eq!(key_list(&p).len(), KEYS.len() + 6);
+        assert_eq!(key_list(&p).len(), KEYS.len() + 7);
         assert_eq!(nth_bullet(&[Action::Step(super::super::Field::Bribe, 1), Action::Close, Action::EndTurn], 1), Some(2));
         assert_eq!(nth_bullet(&[Action::Close], 1), None);
     }
@@ -390,6 +391,15 @@ mod tests {
         key(&mut g, &mut ctx, Key::Char(b'?'));
         assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Keys), .. })));
         shot_at(&g, &assets, "keys", (630, 470));
+        // every Extra with a key on: still fits
+        let saved = assets.prefs.borrow().clone();
+        *assets.prefs.borrow_mut() = Prefs { ledger: true, price_table: true, sell_all: true, undo: true, production_help: true, event_log: true, order_copy: true, ..saved.clone() };
+        g.popups.clear();
+        g.open(&assets, Menu::Keys);
+        shot_at(&g, &assets, "keys_all", (630, 470));
+        *assets.prefs.borrow_mut() = saved;
+        g.popups.clear();
+        g.open(&assets, Menu::Keys);
         key(&mut g, &mut ctx, Key::Escape);
         // Enter: the end-turn confirmation when it is configured, with the turn end behind its yes
         g.cfg_end |= 0x20;
