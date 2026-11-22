@@ -393,7 +393,9 @@ const PREFIGHT_WIN: [i32; 4] = [120, 120, 400, 240];
 /// Replaces each `pat` in EXE markup by already-escaped `with`.
 /// A scene caption box (rules-15 §0.1): gold text that starts 2 px into the box (live A/B, plague).
 fn caption(assets: &Assets, r: [i32; 4], src: &[u8]) -> Window {
-    Window::new(assets, r, &[b"$g", src].concat(), &[], &[], &[]).with_text_dy(-10)
+    // a caption box prints its text 10 px above our window's inset; the full-screen window places its texts by `$nH`
+    // (line 1 = y 36, rules-15 §3.2; live A/B 2026-11-22: the election header stood at y 36, ours at 26)
+    Window::new(assets, r, &[b"$g", src].concat(), &[], &[], &[]).with_text_dy(if r == FULL { 0 } else { -10 })
 }
 
 /// Splits a `print` stream into its `$P` pages (empty ones dropped).
@@ -1867,12 +1869,14 @@ impl Game {
                     self.jury_song = *song;
                     // the jury votes on the county castle picture, a seal for every guilty vote (rules-15 §6.1)
                     let county = State::jury_county(self.st.persons[*person as usize].loc()) as u16;
-                    // rules-18 §12: a juror who has not voted shows the wheel (0x179), a guilty vote the bottle (0x48), an
+                    // a juror who has not voted shows the framed Justice figure (ICONB3), a guilty vote the prison door
+                    // (ICONB2), both 32 px at (62 + 44 i, 420) (live A/B 2026-11-22; rules-18 §12 read 0x179 / 0x48, which
+                    // are a wheel and a bottle in ICONS3: RE question), an
                     // acquittal nothing; first all twelve wheels, then the result
                     // rules-15 §6.1 step 3: `$15H$C$g…` printed into the full-screen window (y 372), no box
                     let caption = assets.text(0xC12F4);
-                    let wheels: Vec<(u16, i32, i32)> = (0..12).map(|i| (0x179, 62 + 44 * i, 420)).collect();
-                    let result: Vec<(u16, i32, i32)> = (0..*guilty as i32).map(|i| (0x48, 62 + 44 * i, 420)).collect();
+                    let wheels: Vec<(u16, i32, i32)> = (0..12).map(|i| (0xB3, 62 + 44 * i, 420)).collect();
+                    let result: Vec<(u16, i32, i32)> = (0..*guilty as i32).map(|i| (0xB2, 62 + 44 * i, 420)).collect();
                     self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: wheels, boxes: vec![(FULL, caption.clone())], anim: None });
                     self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: result, boxes: vec![(FULL, caption)], anim: None });
                     let who = t(&self.pref(*person, 1, 1));
@@ -2655,7 +2659,11 @@ impl Game {
         {
             self.hold(*person as usize, Held::Scene(0));
             let o = match *loc { 0..=9 => *idx as usize, 10..=12 => *idx as usize + 10, _ => *idx as usize + 23 };
-            let pic = Self::place_picture(*loc, mad_sim::career::is_church_office(o), self.st.persons[*person as usize].religion());
+            // the picture's church argument is the person's byte +0x10 (rules-15 §3.1), which holds the controller
+            // nibble too: a dismissed human gets the church variant (live A/B 2026-11-22: 0xC0 for a Baumeister;
+            // computers [UNVERIFIED], by the office kind)
+            let church = self.st.persons[*person as usize].human() || mad_sim::career::is_church_office(o);
+            let pic = Self::place_picture(*loc, church, self.st.persons[*person as usize].religion());
             // rules-15 §3.2/§3.3: the text (`$8H$C$g…`, `$7H` for two or three dismissers) is printed into the
             // full-screen window on the place picture, line by line with its own `$Z` breaks
             self.popups.push_back(Popup::Scene { pic, boxes: vec![(FULL, src)] });
@@ -7636,7 +7644,8 @@ pub(crate) mod tests {
         assert!(g.popups.is_empty());
         g.popups.clear();
         g.report(&assets, vec![SimEvent::Dismissed { person: h, by: vec![c], loc: 12, idx: 3, rival: 0xFF }], vec![]);
-        assert!(matches!(g.popups.front(), Some(Popup::Scene { pic: 0x19F, .. })));
+        // a dismissed human gets the church variant of the place picture (live A/B 2026-11-22), by religion in a county
+        assert!(matches!(g.popups.front(), Some(Popup::Scene { pic: 0xC2 | 0xC3, .. })));
         shot(&g, &assets, "dismissal_scene");
     }
 

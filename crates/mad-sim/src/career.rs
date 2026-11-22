@@ -679,11 +679,12 @@ impl State {
                 };
                 votes[choice] += 1;
                 vote_log.push((e as u8, cands[choice] as u8));
+                // the winner's rand(25) is drawn first, then one rand(10) per other candidate in list order (1619
+                // parity run 2026-11-22: the same draws landed on the wrong candidates in list order)
+                let x = self.ri(25);
+                self.favour_increase(e, cands[choice], x);
                 for (k, &c) in cands.clone().iter().enumerate() {
-                    if k == choice {
-                        let x = self.ri(25);
-                        self.favour_increase(e, c, x);
-                    } else {
+                    if k != choice {
                         let x = self.ri(10);
                         self.favour_decrease(e, c, x);
                     }

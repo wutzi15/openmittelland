@@ -231,7 +231,7 @@ impl State {
         }
     }
 
-    fn prison_check(&mut self, h: usize) -> bool {
+    pub fn prison_check(&mut self, h: usize) -> bool {
         let mut skip = false;
         for t in [20, 21] {
             if let Some(i) = self.heap.find(t, h as u8, ANY) {
@@ -1333,9 +1333,10 @@ impl State {
             let pop = self.cities[c].population();
             self.globals.set_d(ga::TAX_TREASURY + 4 * c, pop);
             self.globals.set_d(ga::TITHE_TREASURY + 4 * c, pop);
-            a = a.wrapping_add(pop);
+            // the indulgence pool sums the halves per city (1619 parity run 2026-11-22: sum/2 was 2 too high)
+            a = a.wrapping_add(pop / 2);
         }
-        self.globals.set_d(ga::INDULGENCES, a / 2);
+        self.globals.set_d(ga::INDULGENCES, a);
         // emperor record (rules-06 §7)
         if let Some(i) = self.heap.find(1, NOBODY, ANY) {
             let r = &mut self.heap.recs[i];
