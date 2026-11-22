@@ -8,8 +8,10 @@ pub enum Key {
     Backspace,
     /// Printable key as CP437 byte (for name entry and hotkeys).
     Char(u8),
-    /// Function key F1..F12 (ours: the original reads none; F10 opens the Extras window).
+    /// Function key F1..F12 (ours: the original reads none).
     Fn(u8),
+    /// Tab (ours: opens the Extras window).
+    Tab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

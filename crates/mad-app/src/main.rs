@@ -227,6 +227,7 @@ impl ApplicationHandler for App {
                     WKey::Named(NamedKey::Escape) => Some(Key::Escape),
                     WKey::Named(NamedKey::Enter) => Some(Key::Enter),
                     WKey::Named(NamedKey::Backspace) => Some(Key::Backspace),
+                    WKey::Named(NamedKey::Tab) => Some(Key::Tab),
                     WKey::Named(k) => [NamedKey::F1, NamedKey::F2, NamedKey::F3, NamedKey::F4, NamedKey::F5, NamedKey::F6, NamedKey::F7, NamedKey::F8, NamedKey::F9, NamedKey::F10, NamedKey::F11, NamedKey::F12]
                         .iter()
                         .position(|f| f == k)
