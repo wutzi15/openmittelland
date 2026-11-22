@@ -490,6 +490,8 @@ impl Game {
                         (tr("Autosave alle:", "Autosave every:"), if p.autosave_years == 0 { on(false) } else { format!("{} {}", p.autosave_years, tr("J.", "y.")) }, Autosave),
                         (tr("Rückgängig:", "Undo:"), on(p.undo), Undo),
                         (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
+                        (tr("Gericht überspringen:", "Skip trials:"), on(p.skip_trial), SkipTrial),
+                        (tr("Posten überspringen:", "Skip auction lot:"), on(p.skip_lot), SkipLot),
                     ]
                 } else {
                     vec![
@@ -2327,6 +2329,11 @@ impl Game {
                 }
                 // no items: the hall runs by itself and a human bids with his hotkey (rules-08 §1.4, `Game::auction_input`)
                 f.raw(b"$C").raw(&line).raw(b"$Z");
+                // ours (`prefs.skip_lot`): the lot is resolved without the human (`Game::auction_input`)
+                if assets.prefs.borrow().skip_lot {
+                    let p = assets.prefs.borrow();
+                    f.raw(b"$C").item(t(p.tr("Tab: Posten überspringen", "Tab: skip this lot")), Action::SkipLot).raw(b"$N");
+                }
             }
             Ask::Building { city, prices } => {
                 // rules-38 §2.3: "%aEin%s für %d Taler.$|" per building, then "%aNichts!"; answer = the building

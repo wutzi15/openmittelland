@@ -43,6 +43,8 @@ OpenMittelland adds optional features the original does not have. All are off by
 | | Autosave alle | | history saves every 1, 5 or 10 years |
 | | Rückgängig | `U` | take the last turn end back |
 | | Spielnummer wählen | | choose the game number or play the daily game |
+| | Gericht überspringen | Space | jump a court scene to the verdict |
+| | Posten überspringen | Tab | let an auction lot run without you, at once |
 | Hilfen und Hausregeln | Schuldenwarnung | | warnings at the start of your turn |
 | | Produktionshilfe | `H` | production advice on the branch screen |
 | | Bilanz | `B` | your yearly accounts |
@@ -67,6 +69,8 @@ The keys work in the Kontor (some also on the Handel map or the branch screen) a
 - **Autosave alle.** At every year start that is a multiple of 1, 5 or 10, the game is also saved to `HISTORY/<year>.DAT` in the saves folder, in the same format as a normal save. The newest ten are kept. Load them from the start menu: "Spiel laden" → "Verlauf...".
 - **Rückgängig.** Before you end a turn, the game keeps a copy of it. In the next turn, `U` in the Kontor (or "Rückgängig" in Optionen) goes back to that moment, once. The copy includes the dice, so ending the turn again the same way gives the same result; only a different decision changes the outcome.
 - **Spielnummer wählen.** A new game normally starts from the clock (one of 6,000 worlds, as in the original). With this on, a screen after the player count offers "Zufall" (the clock), "Tagesspiel" (the same world for everyone on the same day) or a number from 0 to 15203: the same number and player count give the same world. The running game's number is shown in the Extras window until you load another game.
+- **Gericht überspringen.** In a court scene (the charge on the stairs, the court room with witnesses, pleas and the judges' votes, the creditors' jury) Space jumps to the verdict; a hint at the bottom says so. Only the pictures and waits go: every question (bribes, the plea, your vote or sentence as judge) was already asked before the scene, and the dice were already rolled, so the outcome is exactly what watching it would give. The verdict animation and the costs still show.
+- **Posten überspringen.** In the auction hall, Tab or the line "Tab: Posten überspringen" lets the current lot run without you: the computers bid against each other as if you kept silent, with no waits between the calls, and the sold or unsold line follows. Tab on a lot's introduction skips the lot that follows. The dice and the result are those of sitting through it without pressing your key. Esc in the original is different: it ends the lot unsold at once, computer bids dropped.
 
 #### Helpers
 

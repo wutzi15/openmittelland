@@ -640,6 +640,8 @@ enum Pref {
     OrderCopy,
     Confirmations,
     OfficeInfo,
+    SkipTrial,
+    SkipLot,
 }
 
 #[derive(Clone, Debug)]
@@ -725,6 +727,8 @@ enum Action {
     /// Sell stock locally (spec 04 §5.1.2.1): good (0xFF = everything), quantity (0 = all of it).
     Sell(usize, u8, u16),
     Nothing,
+    /// Ours (`prefs.skip_lot`): the auction hall's skip item; handled in `auction_input`, never reaches `act`.
+    SkipLot,
 }
 
 /// One step of the election screen: a strip line at y 421, a coin for candidate `coin`, and whether it ends after
@@ -1113,6 +1117,8 @@ pub struct Game {
     /// Time since the current question appeared (drives the auctioneer's hammer frames).
     ask_ms: u32,
     court_len: usize,
+    /// Ours (`prefs.skip_lot`): the auction lot whose ticks are answered without waiting; 0xFF = the next lot.
+    skip_lot: Option<u8>,
     /// Config bytes the turn flow reads (§9.2, §9.3): end-turn flags `0x17D`, announce `0x17E`.
     cfg_end: u8,
     /// Text speed 0..5 (CONFIG.DAT 0x0F3, rules-43 §2): the report scroll step `SCROLL_STEPS[speed]`.
@@ -1384,6 +1390,7 @@ impl Game {
             speech_ms: 0,
             ask_ms: 0,
             court_len: 0,
+            skip_lot: None,
             cfg_end: cfg(0x17D, 0xFF),
             text_speed: cfg(0xF3, 2).min(5),
             cfg_announce: cfg(0x17E, 0xFF) & 1 != 0,
@@ -4383,7 +4390,7 @@ impl Game {
             return Next::Stay;
         }
         match a {
-            Action::Close | Action::Nothing => {}
+            Action::Close | Action::Nothing | Action::SkipLot => {}
             Action::EndTurn => {
                 (self.branch, self.room) = (None, None);
                 self.undo = ctx.assets.prefs.borrow().undo.then(|| Box::new(self.st.clone()));
@@ -4666,6 +4673,8 @@ impl Game {
                             Pref::OrderCopy => p.order_copy ^= true,
                             Pref::Confirmations => p.confirmations ^= true,
                             Pref::OfficeInfo => p.office_info ^= true,
+                            Pref::SkipTrial => p.skip_trial ^= true,
+                            Pref::SkipLot => p.skip_lot ^= true,
                         }
                         self.st.house = p.house();
                         if let Err(e) = p.save(&ctx.assets.user_saves) {
@@ -4775,18 +4784,69 @@ impl Game {
     }
 
     /// Whether the item under `pos` is a number field (auto-repeat target).
+    /// Ours (`prefs.skip_trial`): whether the front popup is a court presentation that can be skipped: the charge on the
+    /// stairs, the court room up to (not including) the verdict animation, the creditors' jury before its outcome.
+    fn court_skippable(p: &Popup) -> bool {
+        match p {
+            Popup::Scene { pic: 0xC1, .. } => true,
+            Popup::Court { pic: 0xC6, anim, figures, .. } => *anim != Some((100, 133)) && !figures.is_empty(),
+            Popup::Court { pic: 0x193..=0x19F, .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Ours (`prefs.skip_trial`): drop the court popups in front up to the verdict. Only popups go; the sim's state,
+    /// draws and the questions (asked before the scene is queued) are untouched. Returns whether anything was dropped.
+    fn skip_court(&mut self) -> bool {
+        let mut any = false;
+        while self.popups.front().is_some_and(Self::court_skippable) {
+            self.popups.pop_front();
+            any = true;
+        }
+        any
+    }
+
+    /// Ours: a one-line gold hint at the bottom of a full-screen scene.
+    fn draw_hint(frame: &mut Frame, assets: &Assets, text: &str) {
+        Window::new(assets, [20, 436, 600, 40], &[b"$g$C".to_vec(), t(text)].concat(), &[], &[], &[]).draw_text(frame, assets);
+    }
+
     /// The auction hall runs by itself (rules-08 §1.4, rules-25 §1): a human bids by pressing his hotkey, otherwise the
     /// tick ends when its frames (50 ms each) and its speech are done; a click cuts a hammer tick's wait short
     /// (rules-25 §1.3 step 6). Ours: every tick stays at least 100 ms so a bid line can be read [UNVERIFIED].
     fn auction_input(&mut self, ctx: &mut Ctx, input: &crate::input::Input) -> Option<Next> {
-        let Some(Ask::AuctionTick { strip, fresh, blow, hammer, .. }) = self.pending.as_ref().map(|q| &q.ask) else { return None };
+        let Some(Ask::AuctionTick { strip, fresh, blow, hammer, lot, .. }) = self.pending.as_ref().map(|q| &q.ask) else { return None };
         if !matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Question), .. })) {
             return None;
         }
         let frames: u32 = strip.iter().skip(*fresh as usize).map(|&(_, a, b)| u32::from(b.saturating_sub(a))).sum();
-        let (blow, hammer) = (*blow, *hammer);
+        let (blow, hammer, lot) = (*blow, *hammer, *lot);
+        // ours (`prefs.skip_lot`): a skipped lot's ticks are answered "nobody presses" at once, the same answers a
+        // silent human gives by waiting, so the sim's draws and the result are those of watching it
+        let skip = ctx.assets.prefs.borrow().skip_lot;
+        match self.skip_lot {
+            Some(l) if skip && (l == lot || l == 0xFF) => {
+                self.skip_lot = Some(lot);
+                return Some(self.act(Action::Answer(0), ctx));
+            }
+            Some(_) => self.skip_lot = None,
+            None => {}
+        }
         for e in &input.events {
             match *e {
+                Event::Key(Key::Tab) if skip => {
+                    self.skip_lot = Some(lot);
+                    return Some(self.act(Action::Answer(0), ctx));
+                }
+                Event::Left(x, y)
+                    if skip
+                        && let Some(Popup::Choice { acts, .. }) = self.popups.front()
+                        && let Some(w) = self.popups.front().and_then(|p| p.window(ctx.assets, &[]))
+                        && w.item_at((x, y)).is_some_and(|k| matches!(acts.get(k), Some(Action::SkipLot))) =>
+                {
+                    self.skip_lot = Some(lot);
+                    return Some(self.act(Action::Answer(0), ctx));
+                }
                 Event::Key(Key::Char(c)) => {
                     let k = self.st.humans().take(6).position(|h| self.st.persons[h].hotkey().eq_ignore_ascii_case(&c));
                     if let Some(k) = k {
@@ -5429,6 +5489,12 @@ impl Screen for Game {
             if matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Question), .. })) && matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::AuctionCatalog { .. } | Ask::AuctionLine { .. } | Ask::AuctionRefused { .. })) {
                 // a catalogue page, hall line or refusal box is turned by a click
                 if matches!(e, Event::Left(..) | Event::Key(Key::Enter)) {
+                    self.skip_lot = None;
+                    return self.act(Action::Answer(0), ctx);
+                }
+                // ours (`prefs.skip_lot`): Tab on the lot's intro line skips the lot that follows
+                if matches!(e, Event::Key(Key::Tab)) && ctx.assets.prefs.borrow().skip_lot && matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::AuctionLine { step: 1, .. })) {
+                    self.skip_lot = Some(0xFF);
                     return self.act(Action::Answer(0), ctx);
                 }
                 continue;
@@ -5507,6 +5573,10 @@ impl Screen for Game {
                     }
                     continue;
                 }
+            }
+            // ours (`prefs.skip_trial`): Space drops the court's presentation up to the verdict
+            if matches!(*e, Event::Key(Key::Char(b' '))) && ctx.assets.prefs.borrow().skip_trial && self.skip_court() {
+                continue;
             }
             if let Some(Popup::Scene { boxes, .. } | Popup::Court { boxes, .. }) = self.popups.front()
                 && hold_of(&boxes[0].1).is_some()
@@ -5780,6 +5850,9 @@ impl Game {
                     }
                 }
                 p.window(assets, &[]).unwrap().draw_text(frame, assets);
+                if assets.prefs.borrow().skip_trial && Self::court_skippable(p) {
+                    Self::draw_hint(frame, assets, assets.prefs.borrow().tr("Leertaste: überspringen", "Space: skip"));
+                }
                 return Some(Cursor::Arrow);
             }
             Some(Popup::Scene { pic, .. }) if self.reveal.as_ref().is_some_and(|(rp, _)| rp == pic) => {
@@ -5796,6 +5869,9 @@ impl Game {
             Some(p @ Popup::Scene { pic, .. }) => {
                 frame.blit(&assets.icon(*pic)[0], 0, 0);
                 p.window(assets, &[]).unwrap().draw_text(frame, assets);
+                if assets.prefs.borrow().skip_trial && Self::court_skippable(p) {
+                    Self::draw_hint(frame, assets, assets.prefs.borrow().tr("Leertaste: überspringen", "Space: skip"));
+                }
                 return Some(Cursor::Arrow);
             }
             Some(p @ Popup::Bill(..)) => {
@@ -7699,6 +7775,117 @@ pub(crate) mod tests {
         g.open(&assets, Menu::Extras(1));
         shot(&g, &assets, "extras1");
         assert!(g.st.house == mad_sim::state::House::default());
+    }
+
+    /// Ours (pref `skip_trial`): Space drops the court's presentation up to the verdict; off, it does nothing.
+    /// The sim's state is never touched (the scene is only popups queued after the step ran).
+    #[test]
+    fn real_skip_trial() {
+        let Some(assets) = test_assets() else { return };
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap() as u8;
+        let c = (0..mad_sim::state::PERSONS).find(|&p| g.st.persons[p].used() && !g.st.persons[p].human()).unwrap() as u8;
+        let talk = SimEvent::TrialTalk { witnesses: vec![(0, 3, 1, 2), (1, 9, 8, 7)], plea: [6, 5, 3, 2, 1, 1] };
+        let charge = SimEvent::TrialCharge { evidence: 0b101 | 1 << 12, groups: vec![(0, 1, 0), (1, 2, 3)], plea: 6 };
+        let money = SimEvent::TrialMoney { invested: vec![c], bribes: vec![(h, 500), (c, 0)] };
+        let trial = SimEvent::Trial { plaintiff: h, defendant: c, judges: [c, c, h], kind: 0, loc: 3, votes: [true, true, false] };
+        let costs = SimEvent::TrialCosts { plaintiff: h, defendant: c, judges: [c, c, h], payer: c, amount: 240, insured: true };
+        let events = || vec![money.clone(), charge.clone(), talk.clone(), trial.clone(), costs.clone()];
+        let space = Input { events: vec![Event::Key(Key::Char(b' '))], ..Default::default() };
+        // off: Space is no click, the charge stays
+        g.report(&assets, events(), vec![]);
+        let before = g.st.clone();
+        let n = g.popups.len();
+        g.update(&mut ctx, &space, 10);
+        assert!(matches!(g.popups.front(), Some(Popup::Scene { pic: 0xC1, .. })) && g.popups.len() == n);
+        g.popups.clear();
+        // on: the charge, the witnesses, the pleas and the votes go; the verdict animation and the costs stay
+        assets.prefs.borrow_mut().skip_trial = true;
+        g.report(&assets, events(), vec![]);
+        shot(&g, &assets, "trial_skip_hint");
+        g.update(&mut ctx, &space, 10);
+        assert!(matches!(g.popups.front(), Some(Popup::Court { anim: Some((100, 133)), .. })), "{}", g.popups.len());
+        assert_eq!(g.popups.len(), 2);
+        assert!(matches!(g.popups.back(), Some(Popup::Court { figures, .. }) if figures.is_empty()));
+        // a second Space does nothing on the verdict
+        g.update(&mut ctx, &space, 10);
+        assert_eq!(g.popups.len(), 2);
+        assert_eq!(g.st, before);
+        // the creditors' jury: wheels and seals go, the outcome stays
+        g.popups.clear();
+        g.report(&assets, vec![SimEvent::Jury { person: h, guilty: 9, tower: true, last_branch: false, song: 0x0B }], vec![]);
+        g.update(&mut ctx, &space, 10);
+        assert!(matches!(g.popups.front(), Some(Popup::Scene { pic: 0xB9, .. })) && g.popups.len() == 1);
+        assets.prefs.borrow_mut().skip_trial = false;
+    }
+
+    /// Ours (pref `skip_lot`): Tab in the hall answers every tick of the lot at once with "nobody presses", the
+    /// answer a silent human gives by waiting. Two games through the same year end, one waiting the ticks out,
+    /// one skipping every lot, end in the same state after the same questions.
+    #[test]
+    fn real_skip_lot() {
+        let Some(assets) = test_assets() else { return };
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let mut st = State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap();
+        let h = st.current as usize;
+        let b = st.props_of(h, mad_sim::state::KIND_BRANCH).next().unwrap();
+        // an auction this year end with the human as a seller (so he attends) and a few lots
+        st.heap.alloc(3, mad_sim::state::NOBODY, mad_sim::state::NONE, 0);
+        st.props[b].set_trans(0, 20);
+        st.props[b].set_cond(0, 90);
+        st.lot_transporters(h, b, 0, 10);
+        st.props[b].set_trans(1, 20);
+        st.props[b].set_cond(1, 70);
+        st.lot_transporters(h, b, 1, 5);
+        let drive = |g: &mut Game, ctx: &mut Ctx, skip: bool| -> (Vec<Ask>, u32, u32) {
+            g.sim(&assets, Command::EndTurn);
+            let (mut asks, mut ticks, mut waited) = (vec![], 0, 0);
+            let mut guard = 0;
+            while let Some(q) = g.pending.as_ref().map(|p| p.ask.clone()) {
+                guard += 1;
+                assert!(guard < 5000, "{q:?}");
+                while !matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Question), .. })) {
+                    g.popups.pop_front().expect("the question window");
+                }
+                match q {
+                    Ask::AuctionTick { .. } => {
+                        if asks.last() != Some(&q) {
+                            asks.push(q.clone());
+                        }
+                        ticks += 1;
+                        if skip && ticks == 1 {
+                            shot(g, &assets, "auction_skip_item");
+                        }
+                        let input = if skip { Input { events: vec![Event::Key(Key::Tab)], ..Default::default() } } else { Input::default() };
+                        let dt = if skip { 0 } else { 60_000 };
+                        waited += dt;
+                        g.update(ctx, &input, dt);
+                    }
+                    other => {
+                        asks.push(other);
+                        g.act(Action::Answer(0), ctx);
+                    }
+                }
+            }
+            (asks, ticks, waited)
+        };
+        let mut a = Game::start(&assets, st.clone());
+        a.popups.clear();
+        let (asks_a, ticks_a, waited_a) = drive(&mut a, &mut ctx, false);
+        assets.prefs.borrow_mut().skip_lot = true;
+        let mut b = Game::start(&assets, st);
+        b.popups.clear();
+        let (asks_b, ticks_b, waited_b) = drive(&mut b, &mut ctx, true);
+        assets.prefs.borrow_mut().skip_lot = false;
+        assert!(ticks_a > 3, "{ticks_a} ticks");
+        assert_eq!((ticks_a, asks_a), (ticks_b, asks_b));
+        assert!(waited_a > 0 && waited_b == 0);
+        assert_eq!(a.st, b.st);
+        assert_eq!(a.st.rng, b.st.rng);
     }
 
     /// Ours (pref `sell_all`): off, V does nothing and the Handel map has no spot; on, the question, then one
