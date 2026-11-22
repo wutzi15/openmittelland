@@ -458,7 +458,7 @@ impl Game {
                 let p = assets.prefs.borrow().clone();
                 let tr = |de: &'static str, en: &'static str| p.tr(de, en).to_string();
                 let on = |v: bool| if v { tr("Ein", "On") } else { tr("Aus", "Off") };
-                let rows: [(String, String, super::Pref); 12] = [
+                let rows: [(String, String, super::Pref); 13] = [
                     (tr("Vollbild:", "Fullscreen:"), on(p.fullscreen), Fullscreen),
                     (tr("Ganzzahlig skalieren:", "Integer scaling:"), on(p.integer_scale), IntegerScale),
                     (tr("Tempo:", "Speed:"), format!("{}x", p.speed), Speed),
@@ -469,7 +469,8 @@ impl Game {
                     (tr("Sprache:", "Language:"), tr("Deutsch", "English"), Lang),
                     (tr("Produktionshilfe:", "Production help:"), on(p.production_help), ProductionHelp),
                     (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
-                    (tr("Bis 99 Arbeiter:", "Up to 99 workers:"), on(p.more_workers), MoreWorkers),
+                    (tr("Bis 255 Arbeiter:", "Up to 255 workers:"), on(p.more_workers), MoreWorkers),
+                    (tr("Alles verkaufen:", "Sell all:"), on(p.sell_all), SellAll),
                     (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
                 ];
                 f.raw(b"$Z$C^ Extras _$Z");

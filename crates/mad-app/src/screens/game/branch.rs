@@ -185,8 +185,8 @@ impl Game {
                 let list: Vec<u8> = if o[0] == 1 { self.city_goods(b) } else { (0..GOODS as u8).collect() };
                 o[3] = cycle(o[3], &list, d);
             }
-            // rules-36 §3: production workers 0..40; a transport count follows from the quantity
-            OrderField::Workers if o[0] == 1 || o[0] >= 6 => o[4] = (o[4] as i32 + d).clamp(0, if o[0] == 1 { 40 } else { 99 }) as u8,
+            // rules-36 §3: production workers 0..40 (house rule: up to 255); a transport count follows from the quantity
+            OrderField::Workers if o[0] == 1 || o[0] >= 6 => o[4] = (o[4] as i32 + d).clamp(0, if o[0] == 1 { self.st.house.max_workers as i32 } else { 99 }) as u8,
             OrderField::Workers => {}
             OrderField::Means => o[5] = (o[5] as i32 + d).clamp(0, 99) as u8,
             OrderField::Qty => {
@@ -235,7 +235,8 @@ impl Game {
                 f.raw(b" ");
                 word(f, self.good(o[3]), OrderField::Good);
                 f.raw(b"$E$|$30>$L").txt("mit ");
-                f.digits(o[4] as u32, 2, fld(OrderField::Workers));
+                // a third digit only under the house rule (the row shifts by one digit then)
+                f.digits(o[4] as u32, if o[4] > 99 { 3 } else { 2 }, fld(OrderField::Workers));
                 f.txt(" Arbeitern").raw(b"$E$|$62>$7=$C").txt(tb.preps.get(g).map_or("an", String::as_str)).raw(b"$E$|$70>$L");
                 f.digits(o[5] as u32, 2, fld(OrderField::Means));
                 f.raw(b" ").txt(tb.means_pl.get(g).map_or("", String::as_str)).raw(b"$E$|$|$L");

@@ -131,8 +131,9 @@ impl State {
             let jury = if b_left <= 1 && debt <= m / 2 {
                 true
             } else {
+                // house rule: the roll is drawn (same RNG sequence) but never takes a human's last branch
                 let r = self.r(100);
-                r >= 50 || debt <= 0
+                r >= 50 || debt <= 0 || (self.house.debt_mercy && b_left <= 1 && self.persons[h].human())
             };
             if jury {
                 self.jury(h, debt0, nw0, b_left, ch, ev);
@@ -213,5 +214,22 @@ mod tests {
         assert!(court || st.branches(h) == 0);
         // the debt here is far above NW, so pg > 100: always the tower
         assert!(ev.iter().any(|e| matches!(e, Event::Jury { tower: true, .. })) || !court);
+    }
+
+    /// House rule `debt_mercy`: the stage-5 roll is still drawn, but a human's last branch is never seized.
+    #[test]
+    fn house_debt_mercy_keeps_last_branch() {
+        let run = |seed: u32, mercy: bool| {
+            let mut st = State::new_game(seed, 3, &[HumanSetup::test(1)]).unwrap();
+            st.house.debt_mercy = mercy;
+            let h = st.current as usize;
+            st.persons[h].set_cash_raw(-1_000_000);
+            let mut ev = vec![];
+            let court = st.debt_check(h, &mut crate::Auto, &mut ev);
+            (court, st.branches(h))
+        };
+        // some seed seizes the only branch under the original's rules
+        let seed = (1..200).find(|&s| run(s, false) == (false, 0)).expect("a seizing seed");
+        assert_eq!(run(seed, true), (true, 1));
     }
 }

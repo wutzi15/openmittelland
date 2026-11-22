@@ -621,6 +621,7 @@ enum Pref {
     DebtMercy,
     MoreWorkers,
     SeedChoice,
+    SellAll,
 }
 
 #[derive(Clone, Debug)]
@@ -691,6 +692,8 @@ enum Action {
     Bytes(Vec<u8>),
     /// A message in a box at the given rect.
     Boxed(Vec<u8>, [i32; 4]),
+    /// Ours (pref `sell_all`): sell every branch's stock locally, one `SellStock` per branch as by hand, then a summary.
+    SellAll,
     /// An EXE question with `%a` items at the given rect, item k runs action k.
     Inline(Vec<u8>, Vec<Action>, [i32; 4]),
     /// Ja/Nein dialog from an EXE string ending in `%m %m`; Ja runs the action.
@@ -4047,6 +4050,39 @@ impl Game {
     }
 
     /// A yes/no dialog from an EXE string at a documented rectangle.
+    /// Ours (pref `sell_all`): the Ja/Nein question before `Action::SellAll`.
+    fn sell_all_ask(assets: &Assets) -> Action {
+        let p = assets.prefs.borrow();
+        let s = [&b"$C"[..], &t(p.tr("Die Vorräte aller Niederlassungen vor Ort verkaufen?", "Sell the stock of every branch locally?")), b"$N$N%m  %m"].concat();
+        Action::YesNo(s, [140, 160, 360, 160], Box::new(Action::SellAll))
+    }
+
+    /// Ours (pref `sell_all`): one `SellStock` (all goods) per branch, in slot order, exactly what the empty-warehouse
+    /// icon does by hand; then a summary per city.
+    fn sell_all(&mut self, assets: &Assets) {
+        let Some(h) = self.me() else { return };
+        let mut rows = vec![];
+        for b in self.st.props_of(h, mad_sim::state::KIND_BRANCH).collect::<Vec<_>>() {
+            let (cash0, units) = (self.st.persons[h].cash(), (0..mad_sim::state::GOODS).map(|g| self.st.props[b].stock(g) as u32).sum::<u32>());
+            self.sim(assets, Command::SellStock { branch: b as u8, good: 0xFF, qty: 0 });
+            rows.push((self.st.props[b].loc(), units, self.st.persons[h].cash() - cash0));
+        }
+        let p = assets.prefs.borrow();
+        let mut f = Form::new(b"$C^ ");
+        f.txt(p.tr("Alles verkauft", "Sold everything")).raw(b" _$Z$N");
+        // one row per city: "City: n Waren" left, the revenue right (the Optionen rows' `$E$R` layout)
+        let total: i32 = rows.iter().map(|r| r.2).sum();
+        let last = (p.tr("Zusammen", "Total").to_string(), String::new(), total);
+        for (name, units, rev) in rows.iter().map(|&(c, u, r)| (self.loc(c).to_string(), format!(" {u} {}", p.tr("Waren", "goods")), r)).chain([last]) {
+            if units.is_empty() {
+                f.raw(b"$N");
+            }
+            f.raw(b"$|$L").txt(&format!("{name}:{units}")).raw(b"$E$R").txt(&format!("{} Taler", dotted(rev))).raw(b"$N");
+        }
+        let popup = f.popup(assets, 100, 440, None);
+        self.popups.push_front(popup);
+    }
+
     fn yes_no(assets: &Assets, src: Vec<u8>, rect: [i32; 4], yes: Action) -> Popup {
         // These strings end in `%m  %m`: Ja, Nein.
         let mut f = Form::new(&src);
@@ -4170,6 +4206,7 @@ impl Game {
             Action::Text(a) => self.popups.push_front(Form::new(&ctx.assets.text(a)).popup(ctx.assets, 160, 320, None)),
             Action::Bytes(src) => self.popups.push_front(Form::new(&src).popup(ctx.assets, 140, 360, None)),
             Action::Boxed(src, rect) => self.popups.push_front(Form::new(&src).popup_at(rect)),
+            Action::SellAll => self.sell_all(ctx.assets),
             Action::Inline(src, acts, rect) => {
                 let mut f = Form::new(b"");
                 f.inline(&src, acts);
@@ -4386,6 +4423,7 @@ impl Game {
                             Pref::DebtMercy => p.debt_mercy ^= true,
                             Pref::MoreWorkers => p.more_workers ^= true,
                             Pref::SeedChoice => p.seed_choice ^= true,
+                            Pref::SellAll => p.sell_all ^= true,
                         }
                         self.st.house = p.house();
                         if let Err(e) = p.save(&ctx.assets.user_saves) {
@@ -4564,6 +4602,10 @@ impl Game {
                     && (self.branch.is_some() || matches!(self.room, Some(Room::Handel | Room::Schreibstube | Room::Kirche | Room::Bezahlung | Room::Truppen | Room::Hinterzimmer | Room::Kirchgang))) =>
             {
                 self.open(ctx.assets, Menu::Targets(Plot::Bribe));
+            }
+            // ours (pref `sell_all`): V at the Kontor or on the Handel map
+            (Event::Key(Key::Char(b'v' | b'V')), None) if self.me().is_some() && matches!(self.room, None | Some(Room::Handel)) && ctx.assets.prefs.borrow().sell_all => {
+                return self.act(Self::sell_all_ask(ctx.assets), ctx);
             }
             (Event::Left(x, y), None) if self.room == Some(Room::Bezahlung) => self.wage_click(ctx.assets, (x, y)),
             (Event::Left(x, y), None) if let Some(r) = self.room => {
@@ -7227,6 +7269,41 @@ pub(crate) mod tests {
         g.open(&assets, Menu::Extras);
         shot(&g, &assets, "extras");
         assert!(g.st.house == mad_sim::state::House::default());
+    }
+
+    /// Ours (pref `sell_all`): off, V does nothing and the Handel map has no spot; on, the question, then one
+    /// `SellStock` per branch and the summary. The stock afterwards is what selling each branch by hand leaves.
+    #[test]
+    fn real_sell_all() {
+        let Some(assets) = test_assets() else { return };
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap();
+        let b = g.st.props_of(h, mad_sim::state::KIND_BRANCH).next().unwrap();
+        g.st.props[b].set_stock(3, 20);
+        let key = |g: &mut Game, ctx: &mut Ctx| g.update(ctx, &Input { events: vec![Event::Key(Key::Char(b'v'))], ..Default::default() }, 0);
+        key(&mut g, &mut ctx);
+        assert!(g.popups.is_empty());
+        assert!(g.room_def(&assets, Room::Handel).hots.iter().all(|hs| !matches!(hs.act, Action::YesNo(_, _, ref a) if matches!(**a, Action::SellAll))));
+        assets.prefs.borrow_mut().sell_all = true;
+        g.room = Some(Room::Handel);
+        shot_at(&g, &assets, "sell_all_spot", (300, 380));
+        key(&mut g, &mut ctx);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { .. })));
+        shot(&g, &assets, "sell_all_ask");
+        let mut by_hand = g.st.clone();
+        for b in by_hand.props_of(h, mad_sim::state::KIND_BRANCH).collect::<Vec<_>>() {
+            by_hand.apply(Command::SellStock { branch: b as u8, good: 0xFF, qty: 0 }, &mut mad_sim::Auto);
+        }
+        g.popups.clear();
+        g.act(Action::SellAll, &mut ctx);
+        shot(&g, &assets, "sell_all_done");
+        assert_eq!(g.st.props[b].stock(3), 0);
+        assert_eq!(g.st.persons[h].cash(), by_hand.persons[h].cash());
+        assert_eq!(g.st.rng, by_hand.rng);
+        assets.prefs.borrow_mut().sell_all = false;
     }
 
     /// Live A/B screens of the 1600 capture (player "anna", 57 Taler, no office): Nächster Spieler, Kontor 1601, bill.

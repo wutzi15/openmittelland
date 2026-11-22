@@ -32,10 +32,12 @@ pub struct Prefs {
     pub production_help: bool,
     /// House rule: debt stage 5 always goes to the jury instead of rolling for the last branch.
     pub debt_mercy: bool,
-    /// House rule: production orders up to 99 workers instead of 40.
+    /// House rule: production orders up to 255 workers (the order byte) instead of 40.
     pub more_workers: bool,
     /// New game: ask for the game number (fixed seed, daily game) before the player setup.
     pub seed_choice: bool,
+    /// "Alles verkaufen" at the Kontor: one action sells every branch's stock locally.
+    pub sell_all: bool,
 }
 
 impl Default for Prefs {
@@ -54,6 +56,7 @@ impl Default for Prefs {
             debt_mercy: false,
             more_workers: false,
             seed_choice: false,
+            sell_all: false,
         }
     }
 }
@@ -79,6 +82,7 @@ impl Prefs {
                 "debt_mercy" => p.debt_mercy = b,
                 "more_workers" => p.more_workers = b,
                 "seed_choice" => p.seed_choice = b,
+                "sell_all" => p.sell_all = b,
                 _ => {}
             }
         }
@@ -88,7 +92,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -102,6 +106,7 @@ impl Prefs {
             b(self.debt_mercy),
             b(self.more_workers),
             b(self.seed_choice),
+            b(self.sell_all),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -114,7 +119,7 @@ impl Prefs {
 
     /// The sim's house rules from these options.
     pub fn house(&self) -> mad_sim::state::House {
-        mad_sim::state::House { debt_mercy: self.debt_mercy, max_workers: if self.more_workers { 99 } else { 40 } }
+        mad_sim::state::House { debt_mercy: self.debt_mercy, max_workers: if self.more_workers { 255 } else { 40 } }
     }
 }
 

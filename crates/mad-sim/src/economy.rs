@@ -54,6 +54,33 @@ pub const COUNTY: [u8; CITIES] = [10, 10, 10, 10, 11, 11, 11, 12, 12, 12];
 pub fn wage_factor(k: usize) -> i32 {
     92 + 2 * k as i32
 }
+
+// The three worker formulas below run in i64: at the original's w <= 40 none of their 32-bit products
+// overflows, so they equal the EXE's results bit for bit (test `house_i64_matches_i32`); the house rule's
+// up to 255 workers would wrap in i32.
+
+/// §3.2 wage cost terms: `((pay + 100) * (((wl + 450) * (((inf - adj) * (WF * w * WB / 100)) / 10)) / 500 / 10)) / 200 / 10`.
+pub fn wage_terms(wf: i32, w: i32, g: usize, inf_adj: i32, wage_level: i32, pay: i32) -> i32 {
+    let t1 = (wf as i64 * (w * wage_base(g)) as i64) / 100;
+    let t2 = (inf_adj as i64 * t1) / 10;
+    let t3 = ((wage_level as i64 + 450) * t2) / 500 / 10;
+    (((pay as i64 + 100) * t3) / 200 / 10) as i32
+}
+
+/// §3.2 forecast terms (without the means): `I * ((pay + 150) * ((wl + 450) * (WF * w * WB / 100) / 500) / 250) / 1000`.
+pub fn forecast_terms(wf: i32, w: i32, g: usize, wage_level: i32, pay: i32, inf: i32) -> i32 {
+    let t1 = (wf as i64 * (w * wage_base(g)) as i64) / 100;
+    let t2 = ((wage_level as i64 + 450) * t1) / 500;
+    let t3 = ((pay as i64 + 150) * t2) / 250;
+    (inf as i64 * t3 / 1000) as i32
+}
+
+/// §3.3 output before the means and the crowding cut.
+pub fn output_terms(skill: i32, year_f: i32, w: i32, g: usize, pay: i32, city_f: i32, weather: i32) -> i32 {
+    let t1 = ((skill + 250) as i64 * (year_f * w * OUTPUT_BASE[g]) as i64) / 350000;
+    let t2 = ((pay + 150) as i64 * t1 * city_f as i64) / 75000;
+    (((weather as i64 + 200) * t2) / 300) as i32
+}
 /// Uncle's starting order by start city: (good, workers, means) (§1.3).
 pub const UNCLE: [(u8, u8, u8); CITIES] =
     [(3, 4, 8), (4, 7, 1), (0, 10, 2), (1, 6, 2), (2, 6, 3), (3, 4, 8), (2, 6, 3), (4, 7, 1), (1, 6, 2), (0, 10, 2)];
@@ -197,10 +224,7 @@ impl State {
         let y = self.year as i32;
         let adj = if y < 1630 { (1630 - y) * 4 } else { -(y - 1630) };
         let inf = self.globals.d(ga::INFLATION) as i32;
-        let t1 = (wage_factor(self.wealth_decile(city)) * (w * wage_base(g))) / 100;
-        let t2 = ((inf - adj).wrapping_mul(t1)) / 10;
-        let t3 = ((self.cities[city].wage_level() as i32 + 450).wrapping_mul(t2)) / 500 / 10;
-        ((self.persons[owner].pay_workers() as i32 + 100).wrapping_mul(t3)) / 200 / 10
+        wage_terms(wage_factor(self.wealth_decile(city)), w, g, inf - adj, self.cities[city].wage_level() as i32, self.persons[owner].pay_workers() as i32)
     }
 
     /// The order book's cost forecast for a production order (rules-02 §3.2, last paragraph):
@@ -208,10 +232,7 @@ impl State {
     /// It is what the panel prints; the settlement charges `wage_cost` instead.
     pub fn order_forecast(&self, owner: usize, city: usize, g: usize, w: i32, m: i32) -> i32 {
         let inf = self.globals.d(ga::INFLATION) as i32;
-        let t1 = (wage_factor(self.wealth_decile(city)) * (w * wage_base(g))) / 100;
-        let t2 = ((self.cities[city].wage_level() as i32 + 450).wrapping_mul(t1)) / 500;
-        let t3 = ((self.persons[owner].pay_workers() as i32 + 150).wrapping_mul(t2)) / 250;
-        inf.wrapping_mul(t3) / 1000 + m * MEANS_COST[g]
+        forecast_terms(wage_factor(self.wealth_decile(city)), w, g, self.cities[city].wage_level() as i32, self.persons[owner].pay_workers() as i32, inf) + m * MEANS_COST[g]
     }
 
     /// §3.3 branch_effective_skill.
@@ -246,9 +267,7 @@ impl State {
         let city_f = self.cities[c].yield_(g) as i32 + 200 + self.county_bonus(c) - 60 * self.city_blocked(c) as i32;
         let skill = self.effective_skill(branch, g);
         let pay = self.persons[self.props[branch].owner() as usize].pay_workers() as i32;
-        let t1 = ((skill + 250).wrapping_mul(year_f * w * OUTPUT_BASE[g])) / 350000;
-        let t2 = ((pay + 150).wrapping_mul(t1).wrapping_mul(city_f)) / 75000;
-        let mut out = ((self.weather[g] as i32 + 200) * t2) / 300;
+        let mut out = output_terms(skill, year_f, w, g, pay, city_f, self.weather[g] as i32);
         let opt = (w * 10 / MEANS_DIV[g]).max(1);
         if m < opt {
             out = m * out / opt;
@@ -604,6 +623,65 @@ mod tests {
         assert_eq!(s.inflation(), 1404);
         s.year = 1700;
         assert_eq!(s.inflation(), 1642);
+    }
+
+    /// The i64 worker formulas equal the EXE's i32 wrapping arithmetic wherever that does not overflow:
+    /// every w 0..=40 over the input ranges, so `House::default()` stays bit-exact.
+    #[test]
+    fn house_i64_matches_i32() {
+        let wage_old = |wf: i32, w: i32, g: usize, ia: i32, wl: i32, pay: i32| {
+            let t1 = (wf * (w * wage_base(g))) / 100;
+            let t2 = ia.wrapping_mul(t1) / 10;
+            let t3 = (wl + 450).wrapping_mul(t2) / 500 / 10;
+            (pay + 100).wrapping_mul(t3) / 200 / 10
+        };
+        let fc_old = |wf: i32, w: i32, g: usize, wl: i32, pay: i32, inf: i32| {
+            let t1 = (wf * (w * wage_base(g))) / 100;
+            let t2 = (wl + 450).wrapping_mul(t1) / 500;
+            let t3 = (pay + 150).wrapping_mul(t2) / 250;
+            inf.wrapping_mul(t3) / 1000
+        };
+        let out_old = |skill: i32, yf: i32, w: i32, g: usize, pay: i32, cf: i32, wx: i32| {
+            let t1 = (skill + 250).wrapping_mul(yf * w * OUTPUT_BASE[g]) / 350000;
+            let t2 = (pay + 150).wrapping_mul(t1).wrapping_mul(cf) / 75000;
+            (wx + 200) * t2 / 300
+        };
+        for w in 0..=40 {
+            for g in [0, 7, 14] {
+                for (wf, ia, wl, pay, inf) in [(92, 1200 - 120, 0, 0, 1200), (110, 3400, 255, 255, 3400), (100, 1500, 60, 100, 1500)] {
+                    assert_eq!(wage_terms(wf, w, g, ia, wl, pay), wage_old(wf, w, g, ia, wl, pay));
+                    assert_eq!(forecast_terms(wf, w, g, wl, pay, inf), fc_old(wf, w, g, wl, pay, inf));
+                }
+                for (skill, yf, pay, cf, wx) in [(0, 155, 0, 140, -100), (350, 155, 255, 465, 155), (100, 135, 100, 300, 0)] {
+                    assert_eq!(output_terms(skill, yf, w, g, pay, cf, wx), out_old(skill, yf, w, g, pay, cf, wx));
+                }
+            }
+        }
+        // the extremes at 255 workers would wrap in i32; i64 keeps them sane
+        assert!(output_terms(350, 155, 255, 8, 255, 465, 155) > output_terms(350, 155, 99, 8, 255, 465, 155));
+        assert!(wage_terms(110, 255, 14, 3400, 255, 255) > wage_terms(110, 99, 14, 3400, 255, 255));
+    }
+
+    /// House rule `max_workers` 255: output grows with the workers and nothing overflows at the extremes.
+    #[test]
+    fn house_255_workers_output() {
+        let mut s = State::new_game(1, 3, &[crate::world::HumanSetup::test(1)]).unwrap();
+        let h = s.current as usize;
+        let b = s.branch_at(h, 1).unwrap();
+        s.persons[h].set_pay_workers(255);
+        for g in 0..GOODS {
+            let rng = s.rng;
+            let mut last = 0;
+            for w in [1, 10, 40, 99, 180, 255] {
+                s.rng = rng;
+                // exactly the means the workers need (§3.3: fewer cut the output, more add their resale value)
+                let opt = (w * 10 / MEANS_DIV[g]).max(1);
+                let out = s.production_output(b, g, w, opt.min(255));
+                let enough = opt <= 255;
+                assert!((out >= last || !enough) && out < 30000, "g {g} w {w}: {out} after {last}");
+                last = out;
+            }
+        }
     }
 
     /// rules-02 §3.2 worked example: 1600, wealth 40, wage level 50, pay 100 %: 10 Korn workers cost 542.

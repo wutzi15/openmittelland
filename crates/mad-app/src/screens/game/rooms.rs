@@ -172,6 +172,11 @@ impl Game {
                     d.hots.push(Hot { label: vec![], pos: p2, rect: [p2.0, p2.1, w2, h2], act });
                     d.hots.push(Hot { label: vec![], pos: p1, rect: [p1.0, p1.1, w1, h1], act: Action::Open(Menu::City(c as u8)) });
                 }
+                // ours (pref `sell_all`): a labelled spot on the open sea between the compass and the ship, hotkey V
+                if assets.prefs.borrow().sell_all {
+                    let label = super::t(assets.prefs.borrow().tr("Alles verkaufen (V)", "Sell all (V)"));
+                    d.hots.push(Hot { label, pos: (235, 372), rect: [230, 366, 190, 30], act: Game::sell_all_ask(assets) });
+                }
                 // owner flags (rules-30 §1): ICONP6 in the owner's colour at the city's P3; a 40x20 item created before
                 // the towns, so it wins the hover where they overlap and lights nothing (rules-63 §1)
                 for c in 0..CITIES {
