@@ -45,6 +45,7 @@ pub(super) fn key_list(p: &Prefs) -> Vec<(String, String)> {
     v.push(("Esc".into(), tr("Fenster schließen, Raum verlassen", "Close window, leave room")));
     v.push(("1 - 9".into(), tr("Zeile eines Menüs wählen", "Pick a menu line")));
     v.push(("?".into(), tr("Diese Liste", "This list")));
+    v.push(("Tab".into(), tr("Extras", "Extras")));
     for (on, k, de, en) in [(p.ledger, "B", "Bilanz", "Ledger"), (p.price_table, "P", "Preistabelle", "Price table"), (p.sell_all, "V", "Alles verkaufen", "Sell all"), (p.undo, "U", "Letzte Runde zurück", "Undo the last turn"), (p.production_help, "H", "Produktionshilfe (Niederlassung)", "Production help (branch)")] {
         if on {
             v.push((k.into(), tr(de, en)));
@@ -280,7 +281,7 @@ mod tests {
             assert!(KEYS[i + 1..].iter().all(|o| o.0 != k.0));
         }
         let p = Prefs { shortcuts: true, ledger: true, ..Prefs::default() };
-        assert_eq!(key_list(&p).len(), KEYS.len() + 5);
+        assert_eq!(key_list(&p).len(), KEYS.len() + 6);
         assert_eq!(nth_bullet(&[Action::Step(super::super::Field::Bribe, 1), Action::Close, Action::EndTurn], 1), Some(2));
         assert_eq!(nth_bullet(&[Action::Close], 1), None);
     }
