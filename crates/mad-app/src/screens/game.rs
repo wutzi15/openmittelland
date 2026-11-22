@@ -4695,6 +4695,8 @@ impl Game {
             {
                 self.open(ctx.assets, Menu::Targets(Plot::Bribe));
             }
+            // ours: F10 opens the Extras window (all our options and windows) wherever no window is in front
+            (Event::Key(Key::Fn(10)), _) if self.me().is_some() => self.open(ctx.assets, Menu::Extras(0)),
             // ours (pref `sell_all`): V at the Kontor or on the Handel map
             (Event::Key(Key::Char(b'v' | b'V')), None) if self.me().is_some() && matches!(self.room, None | Some(Room::Handel)) && ctx.assets.prefs.borrow().sell_all => {
                 return self.act(Self::sell_all_ask(ctx.assets), ctx);
@@ -7436,6 +7438,14 @@ pub(crate) mod tests {
         let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
         g.popups.clear();
         g.seed = Some(1234);
+        // F10 opens it from the Kontor
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let mut input = crate::input::Input::default();
+        input.events.push(Event::Key(Key::Fn(10)));
+        g.update(&mut ctx, &input, 10);
+        assert!(g.popups.iter().any(|p| matches!(p, Popup::Choice { menu: Some(Menu::Extras(0)), .. })));
+        g.popups.clear();
         g.open(&assets, Menu::Extras(0));
         shot(&g, &assets, "extras");
         g.popups.clear();

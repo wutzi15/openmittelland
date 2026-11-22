@@ -445,7 +445,7 @@ impl Game {
                     f.bullet(&t(label), tog.clone()).raw(b"$E$R").item(value, tog).raw(b"$N$|");
                 }
                 // ours: the modern options, and the undo of the last turn end while one is kept (also key `u` in the Kontor)
-                f.raw(b"$C").item(t("Extras..."), Action::Open(Menu::Extras(0))).raw(b"$N");
+                f.raw(b"$C").item(t("Extras... (F10)"), Action::Open(Menu::Extras(0))).raw(b"$N");
                 if self.undo.is_some() {
                     let p = assets.prefs.borrow();
                     f.raw(b"$C").item(t(p.tr("Rückgängig: letzte Runde zurück", "Undo the last turn")), Action::Undo).raw(b"$N");
