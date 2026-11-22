@@ -6017,23 +6017,35 @@ impl Game {
                 return Some(Cursor::Arrow);
             }
             Some(p @ Popup::Choice { menu: Some(Menu::Question), acts, .. })
-                if matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::JuryBribe { .. } | Ask::BlackmailCanon { .. } | Ask::CanonVeto { .. } | Ask::Vows { .. } | Ask::WeddingFeast { .. })) =>
+                if matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::JuryBribe { .. } | Ask::BlackmailCanon { .. } | Ask::CanonVeto { .. } | Ask::Vows { .. } | Ask::WeddingFeast { .. } | Ask::JudgeVote { .. } | Ask::Sentence { .. } | Ask::ContinueAfterMission { .. })) =>
             {
                 // caption menus on a picture, frameless gold text, ICON73 bullets: the creditors' jury on the county castle
-                // (rules-15 §6.1), the wedding questions on the altar and the banquet (§7.1)
-                let pic = match self.pending.as_ref().map(|q| &q.ask) {
+                // (rules-15 §6.1), the wedding questions on the altar and the banquet (§7.1), the human judge's vote and
+                // sentence on the court room (rules-18 §9, §10; its figures are not drawn here), "Wollt Ihr
+                // weiterspielen?" on the lute picture with plain text items (rules-39 §8)
+                let ask = self.pending.as_ref().map(|q| &q.ask);
+                let pic = match ask {
                     Some(Ask::JuryBribe { county, .. }) => 0x193 + *county as u16,
                     Some(Ask::WeddingFeast { .. }) => 0xFF,
+                    Some(Ask::ContinueAfterMission { .. }) => 0xBB,
+                    Some(Ask::JudgeVote { .. } | Ask::Sentence { .. }) => 0xC6,
                     _ => 0xBE,
                 };
                 frame.blit(&assets.icon(pic)[0], 0, 0);
                 let hover: Vec<usize> = p.window(assets, &[]).unwrap().item_at(mouse).filter(|_| !self.hover.1).into_iter().collect();
                 let w = p.window(assets, &hover).unwrap();
                 w.draw_text(frame, assets);
-                let jury = matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::JuryBribe { .. }));
-                for k in 0..if jury { 1 } else { acts.len() } {
+                let gems = match ask {
+                    Some(Ask::JuryBribe { .. }) => 1,
+                    Some(Ask::ContinueAfterMission { .. }) => 0,
+                    _ => acts.len(),
+                };
+                for k in 0..gems {
                     let it = w.item_rect(k);
-                    frame.blit(&assets.icon(0x73)[0], it.x, it.y);
+                    // the sentence's cycling item is a text item, no gem
+                    if it.w < 20 {
+                        frame.blit(&assets.icon(0x73)[0], it.x, it.y);
+                    }
                 }
                 return Some(Self::form_cursor(&w, acts, mouse));
             }
@@ -6998,6 +7010,7 @@ pub(crate) mod tests {
             (Ask::Sentence { defendant: c }, 2),
             (Ask::JuryBribe { person: h, county: 11 }, 1 + 4),
             (Ask::TrialWitnesses { person: h }, 5 + 5 + 1),
+            (Ask::ContinueAfterMission { person: h, song: 0 }, 2),
         ];
         for (k, (q, n)) in qs.into_iter().enumerate() {
             g.popups.clear();

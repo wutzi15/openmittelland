@@ -1145,10 +1145,15 @@ impl Game {
                     self.popups.push_back(f.popup_at([10, 280, 620, 200]).with_menu(m));
                     return;
                 }
-                // church wedding caption menus (rules-15 §7.1 steps 5, 7, 9): gold text on the altar / banquet picture
+                // church wedding caption menus (rules-15 §7.1 steps 5, 7, 9): gold text on the altar / banquet picture;
+                // the human judge's vote (rules-18 §9 step 5) and sentence (§10 step 1) on the court room; "Wollt Ihr
+                // weiterspielen?" on the lute picture (rules-39 §8)
                 if let Some(rect) = match q {
                     mad_sim::Ask::BlackmailCanon { .. } | mad_sim::Ask::CanonVeto { .. } | mad_sim::Ask::Vows { .. } => Some([80, 180, 480, 280]),
                     mad_sim::Ask::WeddingFeast { .. } => Some([20, 120, 600, 360]),
+                    mad_sim::Ask::JudgeVote { .. } => Some([20, 20, 600, 120]),
+                    mad_sim::Ask::Sentence { .. } => Some([100, 20, 440, 200]),
+                    mad_sim::Ask::ContinueAfterMission { .. } => Some([80, 180, 480, 120]),
                     _ => None,
                 } {
                     f.src.splice(0..0, *b"$g");
@@ -1922,20 +1927,21 @@ impl Game {
                 f.inline(&src, vec![Action::Answer(0), Action::Answer(1)]);
             }
             Ask::JudgeVote { judge } => {
-                // EXE 0xA5F5A: Schuldig! (0) / Nicht schuldig. (1); gold `$g` is for the original's picture
-                let src = super::subst(&super::subst(&assets.text(0xA5F5A), b"%1N3", &t(&self.pref(judge, 1, 3))), b"$g", b"");
+                // EXE 0xA5F5A: Schuldig! (0) / Nicht schuldig. (1), a gold caption menu on the court room (rules-18 §9
+                // step 5)
+                let src = super::subst(&assets.text(0xA5F5A), b"%1N3", &t(&self.pref(judge, 1, 3)));
                 f.inline(&src, vec![Action::Answer(0), Action::Answer(1)]);
             }
             Ask::Sentence { defendant } => {
-                // EXE 0xA600D and the sentence names 0xA8201..0xA8263 (rules-18 §10): one cycling item, entry 3
-                // (loss of title) skipped when the defendant has none
+                // EXE 0xA600D `…Wählt!$Z%a%m$|` and the sentence names 0xA8201..0xA8263 (rules-18 §10 step 1): the bullet
+                // ends, the cycling item steps, entry 3 (loss of title) skipped when the defendant has none
                 let me = self.me().unwrap_or(0) as u8;
                 let head = assets.text(0xA600D);
                 let cut = head.windows(2).position(|w| w == b"%a").unwrap_or(head.len());
-                f.raw(&super::subst(&super::subst(&head[..cut], b"%1N3", &t(&self.pref(me, 1, 3))), b"$g", b"")).raw(b"$Z$L");
+                f.raw(&super::subst(&head[..cut], b"%1N3", &t(&self.pref(me, 1, 3))));
                 let names = [0xA8201u32, 0xA8209, 0xA8214, 0xA822B, 0xA823D, 0xA8252, 0xA8263];
                 let skip3 = self.st.persons[defendant as usize].title() == 0;
-                f.item(assets.text(names[self.amount as usize % 7]), Action::Step(Field::Choice(7, skip3), 1)).raw(b"$Z$C").item(t("Das ist mein Urteil!"), Action::Answer(self.amount));
+                f.item_bullet_raw(b"", Action::Answer(self.amount)).item(assets.text(names[self.amount as usize % 7]), Action::Step(Field::Choice(7, skip3), 1)).raw(b"$|");
             }
             Ask::Plot { kind: 32, step, arg, .. } => {
                 // inventor (rules-13 §2.1): EXE 0xA44DB, 0xA4767, 0xA49C7, 0xA5005; handler 0xA9EE0, 0xAA26D
