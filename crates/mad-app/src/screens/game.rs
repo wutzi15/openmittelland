@@ -17,7 +17,7 @@ use crate::{
     input::{Cursor, Event, Input, Key, cp437},
     text,
 };
-use mad_sim::{Ask, Choices, Command, Event as SimEvent, State, state::NOBODY};
+use mad_sim::{Ask, Choices, Command, Event as SimEvent, State, state::{NOBODY, Person}};
 use std::collections::VecDeque;
 
 /// EXE name tables (`docs/re/rules-00-map.md`): u32 pointers stored relative to linear 0x80000.
@@ -742,6 +742,14 @@ struct ElectStep {
 }
 
 /// rules-15 §3.4: everything is printed straight onto the place picture; the votes come one by one.
+/// The scene a held person waits for (`Game::held`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Held {
+    Elect((u8, u8)),
+    /// a `Popup::Scene` by the address of its boxes (0 until pushed)
+    Scene(usize),
+}
+
 struct Elect {
     /// (place, seat): the vote question and the finished election share one screen
     key: (u8, u8),
@@ -1155,6 +1163,11 @@ pub struct Game {
     apply_rivals: Vec<(u8, u8)>,
     /// (report window identity, cash): the turn-end report's banner cash (`TurnEndCash`)
     turn_cash: Option<(usize, i32)>,
+    /// Persons as they were before the committed command (set while its events are reported).
+    before: Option<Vec<Person>>,
+    /// A person shown as before an election or dismissal until its scene has left the screen: (person, as before,
+    /// the scene). Without it the banner and the candidate lines would show the result before the vote.
+    held: Vec<(usize, Person, Held)>,
     /// events of the pending command already shown before its question (`Choices::show`)
     early_shown: usize,
     /// The cradle stays until the second baby sound has ended (rules-19 §2.1 step 10), ms left.
@@ -1409,6 +1422,8 @@ impl Game {
             reporting_early: false,
             apply_rivals: vec![],
             turn_cash: None,
+            before: None,
+            held: vec![],
             early_shown: 0,
             cry_ms: 0,
             scroll: ReportScroll::default(),
@@ -1468,7 +1483,7 @@ impl Game {
         }
         match r {
             Ok(mut ev) => {
-                self.st = st;
+                let old = std::mem::replace(&mut self.st, st);
                 if self.st.year != y0 {
                     self.report_year = Some(y0);
                 }
@@ -1476,7 +1491,9 @@ impl Game {
                 self.pending_cash = None;
                 let n = std::mem::take(&mut self.early_shown).min(ev.len());
                 ev.drain(..n);
+                self.before = Some(old.persons);
                 self.report(assets, ev, ch.log);
+                self.before = None;
                 self.church = 0;
             }
             Err(e) => match e.downcast::<NeedAnswer>() {
@@ -2473,6 +2490,34 @@ impl Game {
         Elect { key: (loc, seat), pic, head, names, steps, pos: 0, ms: 0 }
     }
 
+    /// Shows `p` as before the reported command until `scene` has left the screen (`held`).
+    fn hold(&mut self, p: usize, scene: Held) {
+        if p < self.st.persons.len() {
+            let pr = self.before.as_ref().map_or(&self.st.persons[p], |b| &b[p]).clone();
+            self.held.push((p, pr, scene));
+        }
+    }
+
+    /// The scene just pushed is the one the last `Held::Scene(0)` waits for.
+    fn held_scene(&mut self) {
+        if let Some(Popup::Scene { boxes, .. }) = self.popups.back() {
+            let at = boxes.as_ptr() as usize;
+            self.held.iter_mut().filter(|h| h.2 == Held::Scene(0)).for_each(|h| h.2 = Held::Scene(at));
+        }
+    }
+
+    /// Drops the held persons whose scene is gone.
+    fn release_held(&mut self) {
+        let popups = &self.popups;
+        self.held.retain(|h| {
+            popups.iter().any(|p| match (p, h.2) {
+                (Popup::Election(el), Held::Elect(k)) => el.key == k,
+                (Popup::Scene { boxes, .. }, Held::Scene(at)) => boxes.as_ptr() as usize == at,
+                _ => false,
+            })
+        });
+    }
+
     /// Election, dismissal and concert scenes (rules-15 §2, §3), divine event boxes (rules-12 §3.10).
     fn scene_extra(&mut self, assets: &Assets, e: &SimEvent) {
         if matches!(e, SimEvent::Divine { .. } | SimEvent::Tornado { .. } | SimEvent::Insulted { .. })
@@ -2485,9 +2530,10 @@ impl Game {
             };
             self.popups.push_back(Form::new(&[b"$Z$L".to_vec(), t(&text)].concat()).popup_at(rect));
         }
-        if let SimEvent::Election { loc, seat, religion, kind, candidates, privileged, .. } = e
+        if let SimEvent::Election { loc, seat, religion, kind, candidates, privileged, winner, .. } = e
             && let Some(text) = self.describe(assets, e)
         {
+            self.hold(*winner as usize, if *kind <= 1 { Held::Elect((*loc, *seat)) } else { Held::Scene(0) });
             // election screen (rules-15 §3.4): place picture, candidates, votes, result in caption boxes
             let o = match *loc { 0..=9 => *seat as usize, 10..=12 => *seat as usize + 10, _ => *seat as usize + 23 };
             let pic = Self::place_picture(*loc, mad_sim::career::is_church_office(o), *religion);
@@ -2511,13 +2557,16 @@ impl Game {
                 boxes.insert(0, ([0, 330, 640, 150], t(&parts[..list].join(" "))));
             }
             self.popups.push_back(Popup::Scene { pic, boxes });
+            self.held_scene();
         }
         if let SimEvent::Dismissed { person, loc, idx, .. } = e
             && let Some(text) = self.describe(assets, e)
         {
+            self.hold(*person as usize, Held::Scene(0));
             let o = match *loc { 0..=9 => *idx as usize, 10..=12 => *idx as usize + 10, _ => *idx as usize + 23 };
             let pic = Self::place_picture(*loc, mad_sim::career::is_church_office(o), self.st.persons[*person as usize].religion());
             self.popups.push_back(Popup::Scene { pic, boxes: vec![([0, 150, 640, 130], [b"$C".to_vec(), t(&text)].concat())] });
+            self.held_scene();
         }
         if let SimEvent::PlotNote { kind: 36, id: id @ 0..=2, a, b, c } = e {
             self.lute_song = Some(*c as u8);
@@ -2590,7 +2639,7 @@ impl Game {
         if pi >= self.st.persons.len() {
             return "Niemand".into();
         }
-        let pr = &self.st.persons[pi];
+        let pr = self.shown(pi);
         let g = (pr.gender() & 1) as usize;
         let title_no = pr.title() as usize;
         let name = self.first_name(pi);
@@ -2676,7 +2725,8 @@ impl Game {
         if p >= self.st.persons.len() {
             return "Niemand".into();
         }
-        let title = &self.tables.titles[(self.st.persons[p].gender() & 1) as usize][(self.st.persons[p].title() as usize).min(9)];
+        let pr = self.shown(p);
+        let title = &self.tables.titles[(pr.gender() & 1) as usize][(pr.title() as usize).min(9)];
         format!("{title} {}", self.first_name(p))
     }
 
@@ -3083,8 +3133,13 @@ impl Game {
         }
     }
 
+    /// A person as the screen shows it now (`held`), else as the state has it.
+    fn shown(&self, p: usize) -> &Person {
+        self.held.iter().find(|h| h.0 == p).map_or(&self.st.persons[p], |h| &h.1)
+    }
+
     fn rank(&self, p: usize) -> String {
-        let pr = &self.st.persons[p];
+        let pr = self.shown(p);
         let office = self.office(pr.loc(), pr.idx());
         if office.is_empty() { "ohne Amt".into() } else { format!("{office} in {}", self.loc(pr.loc())) }
     }
@@ -4742,7 +4797,9 @@ impl Game {
 
     /// Ours: the game as it was before the last turn end (like a load of that moment), once.
     fn undo_game(&mut self, assets: &Assets) -> Option<Game> {
-        let st = *self.undo.take()?;
+        let mut st = *self.undo.take()?;
+        // a fresh seed, so the same decisions can turn out differently
+        st.rng = mad_sim::rng::Rng::new(super::setup::clock_seed());
         let mut g = Game::start(assets, st);
         g.seed = self.seed;
         Some(g)
@@ -5230,6 +5287,7 @@ impl Game {
 
 impl Screen for Game {
     fn update(&mut self, ctx: &mut Ctx, input: &Input, dt_ms: u32) -> Next {
+        self.release_held();
         ctx.audio.set_volumes(self.vol[1], self.vol[0]);
         self.scroll_sync(ctx.assets);
         let click = input.events.iter().find_map(|e| if let Event::Left(x, y) = e { Some((*x, *y)) } else { None });
@@ -7204,6 +7262,29 @@ pub(crate) mod tests {
     }
 
     /// Elections and dismissals are place pictures with caption boxes (screenshot with MAD_SHOT_DIR).
+    /// A human who wins an election keeps his old office in the banner and the candidate lines until the election
+    /// screen has gone (playtest: the banner showed the new office before the vote).
+    #[test]
+    fn real_election_result_after_scene() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap();
+        let before = g.st.persons.clone();
+        g.st.appoint(h, 3, 6);
+        let c = g.st.computers().next().unwrap() as u8;
+        g.before = Some(before);
+        g.report(&assets, vec![SimEvent::Election { loc: 3, seat: 6, candidates: vec![c, h as u8], votes: vec![(c, h as u8)], winner: h as u8, kind: 0, rivals: vec![0xFF, 0xFF], privileged: false, religion: 1 }], vec![]);
+        g.before = None;
+        assert!(g.popups.iter().any(|p| matches!(p, Popup::Election(_))));
+        assert_eq!(g.rank(h), "ohne Amt");
+        g.popups.clear();
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        g.update(&mut ctx, &crate::input::Input::default(), 10);
+        assert_ne!(g.rank(h), "ohne Amt");
+    }
+
     #[test]
     fn real_office_scenes() {
         let Some(assets) = test_assets() else { return };
