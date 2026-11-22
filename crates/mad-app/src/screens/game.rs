@@ -4841,13 +4841,17 @@ impl Game {
     }
 
     /// Whether the item under `pos` is a number field (auto-repeat target).
-    /// Ours (`prefs.skip_trial`): whether the front popup is a court presentation that can be skipped: the charge on the
+    /// Ours (`prefs.skip_trial`, "Szenen überspringen"): whether the front popup is a court presentation or part of the
+    /// funeral that can be skipped. Court: the charge on the
     /// stairs, the court room up to (not including) the verdict animation, the creditors' jury before its outcome.
     fn court_skippable(p: &Popup) -> bool {
         match p {
             Popup::Scene { pic: 0xC1, .. } => true,
             Popup::Court { pic: 0xC6, anim, figures, .. } => *anim != Some((100, 133)) && !figures.is_empty(),
             Popup::Court { pic: 0x193..=0x19F, .. } => true,
+            // the funeral (rules-17 §4, §5): candle film (song 9), gravestone, mourners, testament, notary
+            Popup::Film(f) => f.song == Some(9),
+            Popup::Scene { pic: 0xC7 | 0xC8, .. } | Popup::Will(_) => true,
             _ => false,
         }
     }
@@ -5333,6 +5337,14 @@ impl Screen for Game {
             if self.cry_ms == 0 {
                 self.cradle_done(ctx.assets);
             }
+        }
+        // ours (`prefs.skip_trial`): Space on the funeral's candle film skips the whole funeral
+        if matches!(self.popups.front(), Some(Popup::Film(_)))
+            && input.events.contains(&Event::Key(Key::Char(b' ')))
+            && ctx.assets.prefs.borrow().skip_trial
+            && self.skip_court()
+        {
+            return Next::Stay;
         }
         if let Some(Popup::Film(f)) = self.popups.front_mut() {
             if let Some(n) = f.cue.take()
@@ -7898,6 +7910,15 @@ pub(crate) mod tests {
         // the creditors' jury: wheels and seals go, the outcome stays
         g.popups.clear();
         g.report(&assets, vec![SimEvent::Jury { person: h, guilty: 9, tower: true, last_branch: false, song: 0x0B }], vec![]);
+        g.update(&mut ctx, &space, 10);
+        assert!(matches!(g.popups.front(), Some(Popup::Scene { pic: 0xB9, .. })) && g.popups.len() == 1);
+        // the funeral: candle film, gravestone, mourners, testament and notary go; what follows stays
+        g.popups.clear();
+        g.popups.extend(Game::film_song(&assets, "KERZE.FLC", 9, 10));
+        g.popups.push_back(Popup::Scene { pic: 0xC7, boxes: vec![([160, 150, 320, 200], b"$CHier ruht".to_vec())] });
+        g.popups.push_back(Popup::Scene { pic: 0xC8, boxes: vec![([0, 0, 640, 60], b"$CNotar".to_vec())] });
+        g.popups.push_back(Popup::Will(b"Testament".to_vec()));
+        g.popups.push_back(Popup::Scene { pic: 0xB9, boxes: vec![([0, 400, 640, 80], b"$Cdanach".to_vec())] });
         g.update(&mut ctx, &space, 10);
         assert!(matches!(g.popups.front(), Some(Popup::Scene { pic: 0xB9, .. })) && g.popups.len() == 1);
         assets.prefs.borrow_mut().skip_trial = false;

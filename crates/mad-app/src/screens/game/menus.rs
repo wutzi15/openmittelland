@@ -490,7 +490,7 @@ impl Game {
                         (tr("Autosave alle:", "Autosave every:"), if p.autosave_years == 0 { on(false) } else { format!("{} {}", p.autosave_years, tr("J.", "y.")) }, Autosave),
                         (tr("Rückgängig:", "Undo:"), on(p.undo), Undo),
                         (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
-                        (tr("Gericht überspringen:", "Skip trials:"), on(p.skip_trial), SkipTrial),
+                        (tr("Szenen überspringen:", "Skip scenes:"), on(p.skip_trial), SkipTrial),
                         (tr("Posten überspringen:", "Skip auction lot:"), on(p.skip_lot), SkipLot),
                     ]
                 } else {
