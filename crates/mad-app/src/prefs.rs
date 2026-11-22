@@ -1,4 +1,4 @@
-//! Modern options ("Extras"): ours only, all off by default. Kept in `prefs.txt` next to our saves, never in
+//! Modern options ("Extras"): ours only; the defaults are the game as before. Kept in `prefs.txt` next to our saves, never in
 //! CONFIG.DAT or GAMEn.DAT, so the original still reads every file we write and the default game stays the original.
 
 use std::path::Path;
@@ -13,7 +13,7 @@ pub enum Lang {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prefs {
     pub fullscreen: bool,
-    /// Scale by whole multiples only (sharp pixels, black borders).
+    /// Scale by whole multiples only (sharp pixels, black borders; on by default, as before the option).
     pub integer_scale: bool,
     /// Logic ticks per real tick: 1 = original speed, up to 4.
     pub speed: u8,
@@ -40,7 +40,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             fullscreen: false,
-            integer_scale: false,
+            integer_scale: true,
             speed: 1,
             autosave_years: 0,
             history: 10,
