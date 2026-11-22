@@ -30,31 +30,60 @@ Saves and options go to `%APPDATA%\mittelland-ad` (Windows) or `~/.local/share/m
 
 ### Extras
 
-OpenMittelland adds optional features the original does not have. All are off by default, so a fresh install plays like the original; they live in `prefs.txt` next to the saves and never in `CONFIG.DAT` or the `GAMEn.DAT` saves, which stay readable by the original. Open them with **Tab** or Spieloptionen → Optionen → "Extras...":
+OpenMittelland adds optional features the original does not have. All are off by default, so a fresh install plays like the original. They are stored in `prefs.txt` next to the saves, never in `CONFIG.DAT` or the `GAMEn.DAT` saves, which stay readable by the original. Open the Extras window with **Tab** (wherever no other window is open) or Spieloptionen → Optionen → "Extras...". It has two pages; the last line switches between them. Click an option's bullet or value to change it; changes apply at once.
 
-| page | option | what it does |
-|---|---|---|
-| Anzeige und Komfort | Vollbild | fullscreen (also F11, Alt+Enter) |
-| | Ganzzahlig skalieren | whole-number scaling with black borders (on by default, as before) |
-| | Tempo | 1x to 4x speed for scrolling, waits and animations |
-| | Sprache | German or English for the Extras' own texts (the game's texts come from your copy) |
-| | Hinweise | tooltips after resting the pointer |
-| | Tasten | keyboard shortcuts, list with `?` |
-| | Autosave alle | history saves every 1, 5 or 10 years ("Verlauf..." in the load dialog) |
-| | Rückgängig | take the last turn end back once (`U`) |
-| | Spielnummer wählen | type a game number or play the daily game |
-| Hilfen und Hausregeln | Schuldenwarnung | warns before debt seizure, due loans, orders the cash can't cover |
-| | Produktionshilfe | best worker:means ratio, means needed, expected yield and profit (`H` on the branch screen) |
-| | Bilanz | net worth, cash and branch results per year (`B`) |
-| | Preistabelle | every good in every city, best price marked (`P`) |
-| | Alles verkaufen | sell every branch's stock at once (`V`) |
-| | Chronik | all report texts of this session (`L`) |
-| | Aufträge kopieren | copy a branch's orders (`C`) and paste them into another (`E`) |
-| | Sicherheitsfragen | asks before bribes, denunciations, blackmail, spies, dismissing troops, selling a castle |
-| | Gnade bei Schulden | house rule: debt never takes your last branch |
-| | Bis 255 Arbeiter | house rule: production orders up to 255 workers (the original: 40) |
+| page | option | key | what it does |
+|---|---|---|---|
+| Anzeige und Komfort | Vollbild | F11, Alt+Enter | fullscreen |
+| | Ganzzahlig skalieren | | sharp whole-number scaling (on by default) |
+| | Tempo | | game speed 1x to 4x |
+| | Sprache | | German or English for the Extras' own texts |
+| | Hinweise | | tooltips |
+| | Tasten | `?` | keyboard shortcuts |
+| | Autosave alle | | history saves every 1, 5 or 10 years |
+| | Rückgängig | `U` | take the last turn end back |
+| | Spielnummer wählen | | choose the game number or play the daily game |
+| Hilfen und Hausregeln | Schuldenwarnung | | warnings at the start of your turn |
+| | Produktionshilfe | `H` | production advice on the branch screen |
+| | Bilanz | `B` | your yearly accounts |
+| | Preistabelle | `P` | all prices in all cities |
+| | Alles verkaufen | `V` | sell the stock of every branch at once |
+| | Chronik | `L` | every report of this session |
+| | Aufträge kopieren | `C`, `E` | copy orders from one branch to another |
+| | Sicherheitsfragen | | ask before actions that can't be taken back |
+| | Gnade bei Schulden | | house rule: debt never takes your last branch |
+| | Bis 255 Arbeiter | | house rule: up to 255 workers per production order |
 
-The house rules change the game: a save played with them may not behave the same in the original.
+The keys work in the Kontor (some also on the Handel map or the branch screen) and only while their option is on.
+
+#### Display and comfort
+
+- **Vollbild, Ganzzahlig skalieren.** The game is drawn at 640×480 and scaled to the window. Whole-number scaling keeps every pixel sharp and leaves black borders; with it off the picture fills the largest 4:3 area of the window.
+- **Tempo.** Runs the game clock 2, 3 or 4 times faster: report scrolling, waits, animations, films and battles. The music plays at normal speed.
+- **Sprache.** Only the texts OpenMittelland adds (Extras, tooltips, the new windows) switch to English. Everything else is the original's German text, read from your copy of the game.
+- **Hinweise.** Rest the pointer for about half a second on a spot in the Kontor, a room, the Handel map, the branch screen or a menu line, and a label says what a click does.
+- **Tasten.** In the Kontor: `M` Handel map, `S` Schreibstube, `R` Spielstand, `G` wages, `Z` Hinterzimmer, `K` Kirche, `T` Söldner & Räuber, `D` Kreditbuch, `O` Spieloptionen; Space or Enter end the turn (with the usual confirmation), Esc closes a window or leaves a room, `1`–`9` pick a line of an open menu, `?` lists all keys.
+- **Autosave alle.** At every year start that is a multiple of 1, 5 or 10, the game is also saved to `HISTORY/<year>.DAT` in the saves folder, in the same format as a normal save. The newest ten are kept. Load them from the start menu: "Spiel laden" → "Verlauf...".
+- **Rückgängig.** Before you end a turn, the game keeps a copy of it. In the next turn, `U` in the Kontor (or "Rückgängig" in Optionen) goes back to that moment, once. The copy includes the dice, so ending the turn again the same way gives the same result; only a different decision changes the outcome.
+- **Spielnummer wählen.** A new game normally starts from the clock (one of 6,000 worlds, as in the original). With this on, a screen after the player count offers "Zufall" (the clock), "Tagesspiel" (the same world for everyone on the same day) or a number from 0 to 15203: the same number and player count give the same world. The running game's number is shown in the Extras window until you load another game.
+
+#### Helpers
+
+- **Schuldenwarnung.** At the start of your turn a "Warnung" window appears if your debts will trigger a seizure at the year end (and says so when only one branch is left, which can then be lost), if a loan falls due next year, or if your confirmed orders cost more than your cash.
+- **Produktionshilfe.** On the branch screen press `H` or click "Hilfe (H)". For the branch's first production order it shows: the best ratio of workers to means for that good (for example Korn 5:1, Fisch 3:1), how many means your workers can use, the expected yield at average weather times the local price, the cost and the profit. Each year a limit between 30 and 39 is drawn; every worker above it adds only half as much. Below that, a table lists every good of the city with its ratio, means price and local price.
+- **Bilanz.** `B` in the Kontor. Page one: net worth and cash per year with bars, last ten years. Page two ("Niederlassungen"): per city, the sales of the shipments from that branch minus its wages, means and transport. Not counted per branch: goods sold directly on the branch screen, tolls and director fees. A year appears at the start of the next turn. The accounts are kept while the game runs and start empty after loading.
+- **Preistabelle.** `P` in the Kontor: all 15 goods in all ten cities; the best price of each good is in gold.
+- **Alles verkaufen.** `V` in the Kontor or on the Handel map, or the gold "Verkaufen" on the map's sea. After a Ja/Nein question it sells the whole stock of every branch at local prices, exactly as if you clicked the empty-warehouse icon in each branch, and shows what was sold where.
+- **Chronik.** `L` in the Kontor: the text of every report window of this session (turn ends, year ends, fate), newest first, page by page. It starts empty after loading.
+- **Aufträge kopieren.** On a branch screen `C` copies its four order slots, `E` pastes them into the branch you are looking at. The game checks each order at the new place; an order that is impossible there shows as impossible. Confirmed orders already carry over to the next year by themselves.
+- **Sicherheitsfragen.** A Ja/Nein question before bribes, denunciations, blackmail, hiring spies, dismissing troops and selling a castle. Saboteurs and selling a branch or residence already ask in the original.
+
+#### House rules
+
+These change the game. A save played with them can behave differently when loaded in the original.
+
+- **Gnade bei Schulden.** When debt reaches the last stage, the original rolls between a court case and seizing your last branch, which ends the game. With this on it is always the court case. The dice are still rolled, so the rest of the game stays the same.
+- **Bis 255 Arbeiter.** Production orders take up to 255 workers instead of 40. Workers above the yearly limit of 30 to 39 add half as much each, so large crews pay off less per worker.
 
 Command-line options:
 
