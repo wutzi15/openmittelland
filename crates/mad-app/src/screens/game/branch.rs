@@ -30,7 +30,7 @@ const ROWS: u8 = 2;
 
 type GoodSlot = (u8, [i32; 4], [i32; 4]);
 
-fn control_rect(i: usize) -> [i32; 4] {
+pub(super) fn control_rect(i: usize) -> [i32; 4] {
     [38 + 100 * i as i32, CONTROL_Y, 64, 64]
 }
 
@@ -358,7 +358,7 @@ impl Game {
     }
 
     /// Goods row geometry: (good, icon rect, stock-number rect), plus the warehouse icon.
-    fn goods_row(&self, b: usize) -> (Vec<GoodSlot>, [i32; 4]) {
+    pub(super) fn goods_row(&self, b: usize) -> (Vec<GoodSlot>, [i32; 4]) {
         // formats §11.3: the city's own goods, then every other good the branch holds (a stolen order book's
         // product, deliveries; playtest: leather in Lichterheide could not be sold)
         let mut goods = self.city_goods(b);

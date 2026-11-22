@@ -24,6 +24,8 @@ pub struct Prefs {
     /// "Rückgängig": the turn end can be taken back once.
     pub undo: bool,
     pub tooltips: bool,
+    /// Keyboard shortcuts: Kontor keys, Space/Enter end the turn, 1-9 pick a menu line, ? lists them.
+    pub shortcuts: bool,
     /// Warnings before debt seizure, loans due and similar.
     pub warnings: bool,
     /// Language of our own texts (the original's texts stay as in the user's game files).
@@ -54,6 +56,7 @@ impl Default for Prefs {
             history: 10,
             undo: false,
             tooltips: false,
+            shortcuts: false,
             warnings: false,
             lang: Lang::De,
             production_help: false,
@@ -82,6 +85,7 @@ impl Prefs {
                 "history" => p.history = n.max(1),
                 "undo" => p.undo = b,
                 "tooltips" => p.tooltips = b,
+                "shortcuts" => p.shortcuts = b,
                 "warnings" => p.warnings = b,
                 "lang" => p.lang = if v == "en" { Lang::En } else { Lang::De },
                 "production_help" => p.production_help = b,
@@ -100,7 +104,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -108,6 +112,7 @@ impl Prefs {
             self.history,
             b(self.undo),
             b(self.tooltips),
+            b(self.shortcuts),
             b(self.warnings),
             if self.lang == Lang::En { "en" } else { "de" },
             b(self.production_help),
@@ -140,7 +145,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, debt_mercy: true, seed_choice: true, ledger: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();

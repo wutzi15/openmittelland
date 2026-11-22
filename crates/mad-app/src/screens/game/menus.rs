@@ -466,6 +466,7 @@ impl Game {
                         (tr("Tempo:", "Speed:"), format!("{}x", p.speed), Speed),
                         (tr("Sprache:", "Language:"), tr("Deutsch", "English"), Lang),
                         (tr("Hinweise:", "Tooltips:"), on(p.tooltips), Tooltips),
+                        (tr("Tasten (?):", "Shortcuts (?):"), on(p.shortcuts), Shortcuts),
                         (tr("Autosave alle:", "Autosave every:"), if p.autosave_years == 0 { on(false) } else { format!("{} {}", p.autosave_years, tr("J.", "y.")) }, Autosave),
                         (tr("Rückgängig:", "Undo:"), on(p.undo), Undo),
                         (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
@@ -617,6 +618,16 @@ impl Game {
                     f.raw(b"$E$|$N");
                 }
                 self.popups.push_back(f.popup_at([10, 10, 620, 460]).with_menu(m));
+                return;
+            }
+            Menu::Keys => {
+                // ours (`prefs.shortcuts`): the key list, key ?
+                let pr = assets.prefs.borrow().clone();
+                f.raw(b"$Z$C^ ").txt(pr.tr("Tasten", "Keys")).raw(b" _$Z");
+                for (key, what) in super::tips::key_list(&pr) {
+                    f.raw(b"$|$L").txt(&key).raw(b"$E$|$150[$L").txt(&what).raw(b"$E$|$N");
+                }
+                self.popups.push_back(f.popup_at([100, 20, 440, 440]).with_menu(m));
                 return;
             }
             Menu::Music => {

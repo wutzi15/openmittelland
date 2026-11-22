@@ -6,6 +6,7 @@ mod battle;
 mod branch;
 mod menus;
 mod rooms;
+mod tips;
 
 use rooms::Room;
 
@@ -502,6 +503,8 @@ enum Menu {
     /// `prefs.price_table`).
     Ledger(u8),
     Prices,
+    /// Ours (`prefs.shortcuts`): the key list.
+    Keys,
     /// Ours (`prefs.production_help`): the production help of branch `b` (key H on the branch screen).
     ProdHelp(usize),
     /// The player's privileges (rules-04b §4.1).
@@ -621,6 +624,7 @@ enum Pref {
     Autosave,
     Undo,
     Tooltips,
+    Shortcuts,
     Warnings,
     Lang,
     ProductionHelp,
@@ -1031,6 +1035,8 @@ pub struct Game {
     /// The banner's gold display is a menu item (formats §9.1): lit under the pointer, and it stays lit under the
     /// bribery map it opens, which does not repaint the banner (live A/B)
     gold_hot: bool,
+    /// Ours (`prefs.tooltips`): where the pointer rests and for how many ms.
+    tip: ((i32, i32), u32),
     /// rules-55 §15: 0x85CC0 "no branch visited this turn", set at the turn start, cleared when a branch screen opens
     /// (kept app-side: the replay rebuilds the sim state from commands, and opening a branch is no command)
     unvisited: bool,
@@ -1288,6 +1294,7 @@ impl Game {
             tree_bars: vec![],
             hover: (None, false),
             gold_hot: false,
+            tip: ((-1, -1), 0),
             unvisited: true, // a loaded game starts in a turn with no branch visited yet
             tree_rival: None,
             amts: [0; 4],
@@ -4507,6 +4514,7 @@ impl Game {
                             Pref::Autosave => p.autosave_years = match p.autosave_years { 0 => 1, 1 => 5, 5 => 10, _ => 0 },
                             Pref::Undo => p.undo ^= true,
                             Pref::Tooltips => p.tooltips ^= true,
+                            Pref::Shortcuts => p.shortcuts ^= true,
                             Pref::Warnings => p.warnings ^= true,
                             Pref::Lang => p.lang = if p.lang == crate::prefs::Lang::De { crate::prefs::Lang::En } else { crate::prefs::Lang::De },
                             Pref::ProductionHelp => p.production_help ^= true,
@@ -4725,6 +4733,8 @@ impl Game {
                 None => drop(self.act(Action::EndTurn, ctx)),
             },
             (Event::Left(x, y), None) => self.click_kontor(ctx.assets, (x, y)),
+            // ours (`prefs.shortcuts`): Kontor keys, Space / Enter end the turn, ? the key list
+            (Event::Key(k), _) if self.me().is_some() && ctx.assets.prefs.borrow().shortcuts && self.shortcut(ctx, k) => {}
             // ours: the production help of the branch screen (key H) and the Kontor keys of the ledger and the
             // price table, each behind its option
             (Event::Key(Key::Char(c)), Some(b)) if c.eq_ignore_ascii_case(&b'h') && ctx.assets.prefs.borrow().production_help => self.open(ctx.assets, Menu::ProdHelp(b)),
@@ -4996,6 +5006,8 @@ impl Screen for Game {
         ctx.audio.set_volumes(self.vol[1], self.vol[0]);
         self.scroll_sync(ctx.assets);
         let click = input.events.iter().find_map(|e| if let Event::Left(x, y) = e { Some((*x, *y)) } else { None });
+        // ours (`prefs.tooltips`): the rest time of the pointer, restarted by a move or any input
+        self.tip = if self.tip.0 == input.mouse && input.events.is_empty() { (input.mouse, self.tip.1.saturating_add(dt_ms)) } else { (input.mouse, 0) };
         match self.popups.front() {
             None => self.gold_hot = self.me().is_some() && hit(GOLD_RECT, click.unwrap_or(input.mouse)),
             Some(Popup::Map(Plot::Bribe)) => {}
@@ -5334,6 +5346,24 @@ impl Screen for Game {
             {
                 continue;
             }
+            // ours (`prefs.shortcuts`): 1-9 click the n-th bullet of the open menu (number fields do not count)
+            if let Event::Key(Key::Char(c @ b'1'..=b'9')) = *e
+                && ctx.assets.prefs.borrow().shortcuts
+                && let Some(Popup::Choice { acts, .. }) = self.popups.front()
+            {
+                let acts = acts.clone();
+                let k = tips::nth_bullet(&acts, (c - b'1') as usize);
+                if let Some(k) = k
+                    && let Some(w) = self.popups.front().and_then(|p| p.window(ctx.assets, &[]))
+                {
+                    let r = w.item_rect(k);
+                    let n = self.click_form(ctx, &w, &acts, (r.x + r.w / 2, r.y + r.h / 2));
+                    if !matches!(n, Next::Stay) {
+                        return n;
+                    }
+                }
+                continue;
+            }
             if !self.popups.is_empty() {
                 let pos = match *e {
                     Event::Left(x, y) => (x, y),
@@ -5428,6 +5458,9 @@ impl Screen for Game {
 
     fn draw(&self, frame: &mut Frame, assets: &Assets, mouse: (i32, i32)) -> Option<Cursor> {
         let c = self.draw_screen(frame, assets, mouse);
+        if let Some(tip) = self.tooltip(assets, mouse) {
+            tips::draw_tip(frame, assets, &tip, mouse);
+        }
         // the wheel of wait_click: 16 frames, one per BIOS tick (~55 ms), restarted by every wait (rules-41 §3)
         match (c, self.wait_ms.1) {
             (Some(_), Some(_)) => Some(Cursor::Wheel((self.wait_ms.0 / 55 % 16) as u8)),
@@ -6107,11 +6140,11 @@ pub(crate) mod tests {
 
     /// With `MAD_SHOT_DIR` set, writes the current frame there (visual check of dialogs that a
     /// scripted UI run cannot reach).
-    fn shot(g: &Game, assets: &Assets, name: &str) {
+    pub(super) fn shot(g: &Game, assets: &Assets, name: &str) {
         shot_at(g, assets, name, (630, 470));
     }
 
-    fn shot_at(g: &Game, assets: &Assets, name: &str, mouse: (i32, i32)) {
+    pub(super) fn shot_at(g: &Game, assets: &Assets, name: &str, mouse: (i32, i32)) {
         let Ok(dir) = std::env::var("MAD_SHOT_DIR") else { return };
         let mut frame = crate::gfx::Frame::new(assets.palette);
         g.draw(&mut frame, assets, mouse);
