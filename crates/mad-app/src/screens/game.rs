@@ -1064,12 +1064,13 @@ impl Popup {
             Popup::Will(src) => Window::new(assets, [40, 100, 560, 280], src, &[], &[], &[]),
             Popup::Chronicle(src) => Window::new(assets, YEAR_BOX, src, &[], &[], &[]).with_scroll(),
             Popup::YearReport(lines) => Window::new(assets, YEAR_BOX, &report_src(lines), &[], &[], &[]).with_scroll(),
-            Popup::Choice { rect, src, items, gems, .. } => {
+            Popup::Choice { rect, src, items, gems, menu, .. } => {
                 let refs: Vec<&[u8]> = items.iter().map(Vec::as_slice).collect();
                 let w = Window::new(assets, *rect, src, &refs, &[], lit).with_text_dy(if *gems { GEM_DY } else { 0 });
                 // a menu printed into the turn-end report window keeps its scroll frame and is scrolled up until its
-                // last line ends at the window bottom, to the pixel (rules-63 §2.3; live A/B 2026-11-22: 94 px)
-                if *rect == REPORT_BOX || *rect == YEAR_BOX {
+                // last line ends at the window bottom, to the pixel (rules-63 §2.3; live A/B 2026-11-22: 94 px); the
+                // donation and army dialogs are scrolling text windows too (rules-38 §2.3, §2.6, §2.7: style 0xA810)
+                if *rect == REPORT_BOX || *rect == YEAR_BOX || matches!(menu, Some(Menu::PrivCity(_) | Menu::PrivArmy(_) | Menu::PrivAsk(9))) {
                     let over = (w.laid.height - rect[3]).max(0);
                     w.with_scroll().with_text_dy(GEM_DY - over)
                 } else {
@@ -4751,9 +4752,16 @@ impl Game {
                 self.sim(ctx.assets, Command::Privilege { holder: holder as u8, code, a, b });
                 let tid = |n: u32| ctx.assets.text_id(n);
                 let name_id = u32::from_le_bytes(ctx.assets.exe_bytes(0x86778 + 4 * code as u32, 4).try_into().unwrap());
-                // the dialogs' closing messages (rules-38 §2.6, 2.10, 2.11)
+                // the army dialog prints "Euer Heer wird mit Waffen ausgerüstet..." under its text and waits for a click
+                // (rules-38 §2.6 step 6, §2.7)
+                if matches!(code, 28 | 29) {
+                    self.open(ctx.assets, Menu::PrivArmy(code));
+                    if let Some(p) = self.popups.pop_back() {
+                        self.close_in_dialog(p, &tid(2147));
+                    }
+                }
+                // the info boxes after a dialog (rules-38 §2.10, 2.11)
                 let after = match code {
-                    28 | 29 => Some((tid(2147), [120, 120, 400, 240])),
                     53 => Some((subst(&tid(3056), b"%s", &t(self.loc(loc as u8))), [160, 180, 320, 120])),
                     54 | 84 if a < 2 => Some((subst_seq(&tid(name_id + 5), b"%s", &[t(self.loc(loc as u8)), tid(name_id + 2 + a as u32)]), [160, 140, 320, 200])),
                     _ => None,
@@ -4913,6 +4921,18 @@ impl Game {
                     if let Ask::Match { target, .. } = ask {
                         self.kupplerin_after(ctx.assets, target as usize, v == 0);
                     }
+                    // the donation prints "Ihr stiftet ein..." under the building menu and waits for a click (rules-38
+                    // §2.3 step 4)
+                    if let Ask::Building { city, .. } = ask
+                        && v < 5
+                        && self.pending.is_none()
+                    {
+                        let tid = |n: u32| ctx.assets.text_id(n);
+                        let mut f = Form::default();
+                        self.question(ctx.assets, &mut f, &ask);
+                        let msg = subst_seq(&tid(2528), b"%s", &[tid(2520 + v), t(self.loc(city))]);
+                        self.close_in_dialog(f.popup_at([120, 120, 400, 240]).with_menu(Menu::PrivAsk(9)), &msg);
+                    }
                 }
             }
         }
@@ -4937,10 +4957,20 @@ impl Game {
 
     /// Click on a form item: words and digits step by the clicked half and the open menu is
     /// rebuilt; everything else acts.
+    /// A dialog that prints its closing line under its own text and waits for a click (rules-38 §2.3 step 4, §2.6
+    /// step 6): `p` as it was answered, its items inert, `msg` below; any click closes it (`click_form`).
+    fn close_in_dialog(&mut self, p: Popup, msg: &[u8]) {
+        let Popup::Choice { rect, mut src, items, acts, menu, gems } = p else { return };
+        src.extend_from_slice(msg);
+        let acts = vec![Action::Inert; acts.len()];
+        self.popups.push_front(Popup::Choice { rect, src, items, acts, menu, gems });
+    }
+
     fn click_form(&mut self, ctx: &mut Ctx, w: &Window, acts: &[Action], pos: (i32, i32)) -> Next {
-        // A window without choices (information) closes on any click; the Bewerbung applicants window only on a
-        // right click (live A/B 2026-11-22: left clicks on its text and its corner do nothing)
-        if acts.is_empty() {
+        // A window without choices (information, or an answered dialog with its closing line, `close_in_dialog`)
+        // closes on any click; the Bewerbung applicants window only on a right click (live A/B 2026-11-22: left
+        // clicks on its text and its corner do nothing)
+        if acts.iter().all(|a| matches!(a, Action::Inert)) {
             if !matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Applicants(..)), .. })) {
                 self.popups.pop_front();
             }
@@ -5831,6 +5861,8 @@ impl Screen for Game {
                     // other questions need an answer
                     Event::Right(..) if matches!(self.pending.as_ref().map(|p| &p.ask), Some(Ask::LoanOffer { .. })) => return self.act(Action::Answer(1), ctx),
                     Event::Right(..) if matches!(self.pending.as_ref().map(|p| &p.ask), Some(Ask::PickDirector { .. })) => return self.act(Action::Answer(u8::MAX as u32), ctx),
+                    // the donation menu: a right click is "Nichts" (rules-38 §2.3 step 3, `choose` returns last + 1)
+                    Event::Right(..) if matches!(self.pending.as_ref().map(|p| &p.ask), Some(Ask::Building { .. })) => return self.act(Action::Answer(5), ctx),
                     Event::Right(..) if matches!(self.popups.front(), Some(Popup::Choice { menu: Some(Menu::Question), .. })) && let Some(Ask::PreFight { q, .. }) = self.pending.as_ref().map(|p| &p.ask) => {
                         use mad_sim::fight::Parley;
                         // rules-52: a right click is "Niemals" (0), withdraw (1), "Genug" (0), stay out (2)
@@ -6315,8 +6347,8 @@ impl Game {
                     let id = if selected || chosen || (live && hover.contains(&k)) { 0x74 } else { 0x73 };
                     // the bullet is the item itself (`%a`), its top on the line's top (live A/B: Kerzen, Optionen);
                     // a spinner digit next to it is no bullet
-                    // scrolled report-window menus: no gem above or below the window
-                    let inside = !matches!(p, Popup::Choice { rect, .. } if *rect == REPORT_BOX && (it.y < rect[1] || it.y + 16 > rect[1] + rect[3]));
+                    // scrolled menus: no gem above or below the window
+                    let inside = !matches!(p, Popup::Choice { rect, .. } if w2.scroll && (it.y < rect[1] || it.y + 16 > rect[1] + rect[3]));
                     if it.w < 20 && !item.last().is_some_and(u8::is_ascii_digit) && inside {
                         frame.blit(&assets.icon(id)[0], it.x, it.y);
                     }
@@ -8015,13 +8047,46 @@ pub(crate) mod tests {
         g.act(Action::Priv(9, 3, 0), &mut ctx);
         assert!(matches!(g.pending.as_ref().map(|q| &q.ask), Some(Ask::Building { city: 3, .. })));
         shot(&g, &assets, "priv_building");
-        g.pending = None;
+        // rules-38 §2.3 step 4: "Ihr stiftet ein..." is printed under the building menu, any click closes it
+        let cash = g.st.persons[h].cash();
+        g.act(Action::Answer(1), &mut ctx);
+        assert!(g.st.persons[h].cash() < cash);
+        let is_done = |p: &Popup| matches!(p, Popup::Choice { menu: Some(Menu::PrivAsk(9)), src, acts, .. } if plain(src).contains("Ihr stiftet eine Kirche") && plain(src).contains("Kathedrale") && acts.iter().all(|a| matches!(a, Action::Inert)));
+        assert!(g.popups.front().is_some_and(is_done), "{:?}", g.popups.front().map(|p| if let Popup::Choice { src, menu, .. } = p { format!("{menu:?} {}", plain(src)) } else { String::new() }));
+        shot(&g, &assets, "priv_building_done");
+        g.update(&mut ctx, &crate::input::Input { events: vec![Event::Left(130, 130)], ..Default::default() }, 10);
+        assert!(!g.popups.iter().any(is_done));
         g.popups.clear();
         // a siege: the army dialog starts at the city's minimum
         g.act(Action::Open(Menu::PrivCity(28)), &mut ctx);
         g.open(&assets, Menu::PrivArmy(28));
         shot(&g, &assets, "priv_army");
         assert!(g.priv_n >= 1);
+        // rules-38 §2.6 step 6: the army text stays, "Euer Heer wird mit Waffen ausgerüstet..." under it
+        g.act(Action::Priv(28, g.priv_city as i32, g.priv_n as i32), &mut ctx);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::PrivArmy(28)), src, acts, .. }) if plain(src).contains("Landsknechte") && plain(src).contains("Euer Heer wird") && acts.iter().all(|a| matches!(a, Action::Inert))));
+        shot(&g, &assets, "priv_army_done");
+    }
+
+    /// rules-42 §1 step 3, rules-63 §2.3: the report lines before a question wait for a click only once they and the
+    /// menu overflow the window; a short window goes straight on to the menu.
+    #[test]
+    fn real_short_window_before_question() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        let gift = Ask::Gift { target: 1, prices: [100, 200, 300], names: [0, 1, 2] };
+        for (n, kept) in [(2, false), (30, true)] {
+            g.popups.clear();
+            g.window = (0..n).map(|i| format!("Zeile {i} vor der Frage.")).collect();
+            g.popups.push_back(Popup::Report(g.window.clone()));
+            g.pending = Some(Pending { cmd: None, answers: vec![], ask: gift.clone() });
+            g.open(&assets, Menu::Question);
+            assert_eq!(g.popups.iter().any(|p| matches!(p, Popup::Report(_))), kept, "{n} lines");
+            assert!(matches!(g.popups.back(), Some(Popup::Choice { rect, .. }) if *rect == REPORT_BOX));
+            if !kept {
+                shot(&g, &assets, "short_window_question");
+            }
+        }
     }
 
     /// The Produktion page with more goods than rows (rules-38 §8): 8 rows left, 5 right, then "Weiteres".
@@ -8062,31 +8127,6 @@ pub(crate) mod tests {
         let mut audio = crate::audio::Audio::new(false);
         let mut ctx = ctx_for(&assets, &mut audio);
         // the keys do nothing while the options are off
-        // rules-38 §2.6 step 6: the army text stays, "Euer Heer wird mit Waffen ausgerüstet..." under it
-        g.act(Action::Priv(28, g.priv_city as i32, g.priv_n as i32), &mut ctx);
-        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::PrivArmy(28)), src, acts, .. }) if plain(src).contains("Landsknechte") && plain(src).contains("Euer Heer wird") && acts.iter().all(|a| matches!(a, Action::Inert))));
-        shot(&g, &assets, "priv_army_done");
-    }
-
-    /// rules-42 §1 step 3, rules-63 §2.3: the report lines before a question wait for a click only once they and the
-    /// menu overflow the window; a short window goes straight on to the menu.
-    #[test]
-    fn real_short_window_before_question() {
-        let Some(assets) = test_assets() else { return };
-        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
-        let gift = Ask::Gift { target: 1, prices: [100, 200, 300], names: [0, 1, 2] };
-        for (n, kept) in [(2, false), (30, true)] {
-            g.popups.clear();
-            g.window = (0..n).map(|i| format!("Zeile {i} vor der Frage.")).collect();
-            g.popups.push_back(Popup::Report(g.window.clone()));
-            g.pending = Some(Pending { cmd: None, answers: vec![], ask: gift.clone() });
-            g.open(&assets, Menu::Question);
-            assert_eq!(g.popups.iter().any(|p| matches!(p, Popup::Report(_))), kept, "{n} lines");
-            assert!(matches!(g.popups.back(), Some(Popup::Choice { rect, .. }) if *rect == REPORT_BOX));
-            if !kept {
-                shot(&g, &assets, "short_window_question");
-            }
-        }
         g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'b')), Event::Key(Key::Char(b'p'))], ..Default::default() }, 0);
         assert!(g.popups.is_empty());
         {

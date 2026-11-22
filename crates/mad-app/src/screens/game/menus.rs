@@ -434,9 +434,10 @@ impl Game {
                         f.raw(b"$N$L$2>").item(b"   ".to_vec(), Action::PrivHolder(if x == h { 0xFF } else { x as u8 })).raw(b"$E$6>").raw(&label).raw(b"$N$|");
                     }
                 }
-                // "Mehr Privilegien" (0xC05DC) near the bottom when there is a second page, and on it to lead back
+                // "Mehr Privilegien" (0xC05DC) at window y 364 when there is a second page, and on it to lead back
+                // (rules-38 §1.3: the item is created at (240, 364))
                 if count > 12 {
-                    f.raw(b"$15H$C").item(assets.text(0xC05DC), Action::PrivPage);
+                    f.raw(b"$364{$C").item(assets.text(0xC05DC), Action::PrivPage);
                 }
                 self.popups.push_back(f.popup_at([100, 40, 440, 400]).with_menu(m));
                 return;
@@ -1177,7 +1178,6 @@ impl Game {
                     f.src.splice(0..0, pre);
                     f.items.splice(0..0, std::iter::repeat_n(b"   ".to_vec(), n));
                     f.acts.splice(0..0, std::iter::repeat_n(Action::Inert, n));
-                    self.popups.push_back(f.popup_at(super::REPORT_BOX).with_menu(m));
                     // the lines before the question wait for a click only once they and the menu overflow the window
                     // (rules-42 §1 step 3: print never pages for a menu, rules-63 §2.3): a fresh window waits at its
                     // first overflow, a window continued under an answered menu once the text passes shown + h − 24
@@ -1195,6 +1195,7 @@ impl Game {
                             self.turn_cash = self.turn_cash.filter(|c| c.0 != key);
                         }
                     }
+                    self.popups.push_back(f.popup_at(super::REPORT_BOX).with_menu(m));
                     return;
                 }
                 if matches!(q, mad_sim::Ask::ContestEntry { .. }) {
@@ -1206,7 +1207,13 @@ impl Game {
                     self.popups.push_back(f.popup_at(super::battle::REPORT_RECT).with_menu(m));
                     return;
                 }
-                if matches!(q, mad_sim::Ask::Building { .. } | mad_sim::Ask::PreFight { .. }) {
+                if matches!(q, mad_sim::Ask::Building { .. }) {
+                    // the donation's scrolling window (rules-38 §2.3), closed with its line by `close_in_dialog`; a right
+                    // click is "Nichts" (`choose`: last item + 1)
+                    self.popups.push_back(f.popup_at([120, 120, 400, 240]).with_menu(Menu::PrivAsk(9)));
+                    return;
+                }
+                if matches!(q, mad_sim::Ask::PreFight { .. }) {
                     self.popups.push_back(f.popup_at([120, 120, 400, 240]).with_menu(m));
                     return;
                 }
@@ -1831,7 +1838,7 @@ impl Game {
     /// Dialogs for the sim questions with a real UI (rules-07 §5.5). Wording is ours except the
     /// occupy question, which is the EXE's (`0xBBE08`, castle; `0xBBF4C`, camp: the sim does not
     /// say which, so the castle text is used, with the location left out).
-    fn question(&self, assets: &Assets, f: &mut Form, q: &mad_sim::Ask) {
+    pub(super) fn question(&self, assets: &Assets, f: &mut Form, q: &mad_sim::Ask) {
         use mad_sim::Ask;
         match *q {
             Ask::PreFight { ref q, .. } => self.prefight_question(assets, f, q),
