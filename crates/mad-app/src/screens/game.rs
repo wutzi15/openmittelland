@@ -148,8 +148,42 @@ fn t(s: &str) -> Vec<u8> {
     out
 }
 
-/// EXE markup to one plain line: `$` codes dropped except `$h` (kept as [`HL`]), `$$` and `%%` unescaped.
+/// Line breaks at the ends of an EXE text, kept by [`plain`] as markers (`$N` → `NL`, `$Z` → `HALF`), printed back
+/// by `report_src`: the original separates the Ereignisse events by the texts' own `$N$N` (live A/B 2026-11-22).
+const NL: char = '\u{2}';
+const HALF: char = '\u{3}';
+
+/// The `$N`/`$Z` codes among the pure layout codes at the start and at the end of `src`, as markers.
+fn edge_breaks(src: &[u8]) -> (String, String) {
+    let mark = |c: u8| match c { b'N' => Some(NL), b'Z' => Some(HALF), _ => None };
+    let skip = |c: u8| matches!(c, b'N' | b'Z' | b'L' | b'R' | b'C' | b'B' | b't' | b'g' | b'|' | b'H' | b'P');
+    let (mut lead, mut i) = (String::new(), 0);
+    while src.get(i) == Some(&b'$') {
+        let mut j = i + 1;
+        while src.get(j).is_some_and(u8::is_ascii_digit) {
+            j += 1;
+        }
+        let Some(&c) = src.get(j).filter(|&&c| skip(c)) else { break };
+        lead.extend(mark(c));
+        i = j + 1;
+    }
+    let (mut trail, mut end) = (vec![], src.len());
+    while let Some(k) = src[..end].iter().rposition(|&b| b == b'$') {
+        let code = &src[k + 1..end];
+        let Some((&c, digits)) = code.split_last() else { break };
+        if !skip(c) || !digits.iter().all(u8::is_ascii_digit) || src[..k].ends_with(b"$") {
+            break;
+        }
+        trail.extend(mark(c));
+        end = k;
+    }
+    (lead, trail.into_iter().rev().collect())
+}
+
+/// EXE markup to one plain line: `$` codes dropped except `$h` (kept as [`HL`]) and the line breaks at both ends
+/// (kept as [`NL`]/[`HALF`] markers), `$$` and `%%` unescaped.
 fn plain(src: &[u8]) -> String {
+    let (lead, trail) = edge_breaks(src);
     let mut out = String::new();
     let mut i = 0;
     while i < src.len() {
@@ -187,7 +221,7 @@ fn plain(src: &[u8]) -> String {
             }
         }
     }
-    out.trim().to_string()
+    format!("{lead}{}{trail}", out.trim())
 }
 
 /// Replaces the successive occurrences of `pat` by the successive `vals` (already escaped).
@@ -757,6 +791,8 @@ struct Elect {
     pic: u16,
     head: Vec<u8>,
     names: Vec<Vec<u8>>,
+    /// the privileged candidate's line 0xC183C (`$N$C…`), printed right under the candidate lines (rules-44 §3)
+    note: Vec<u8>,
     steps: Vec<ElectStep>,
     pos: usize,
     ms: u32,
@@ -783,7 +819,7 @@ impl Elect {
     /// where it stands, past the vote just made.
     fn continue_with(&mut self, next: Elect) {
         let past_ask = self.steps.get(self.pos).is_some_and(|st| st.ask);
-        (self.steps, self.names, self.head) = (next.steps, next.names, next.head);
+        (self.steps, self.names, self.head, self.note) = (next.steps, next.names, next.head, next.note);
         if past_ask {
             self.pos += 1;
             self.ms = 0;
@@ -822,6 +858,11 @@ impl Elect {
                     frame.blit(img, 96 - 18 * k, 153 + 24 * i as i32);
                 }
             }
+        }
+        if !self.note.is_empty() {
+            // the cursor stands under the last candidate line; the text's own `$N` moves it one line down
+            let y = 150 + 24 * self.names.len() as i32;
+            caption(assets, [0, y - 2, 640, 72], &self.note).draw_text(frame, assets);
         }
         if let Some(st) = self.steps.get(self.pos).filter(|st| !st.strip.is_empty()) {
             caption(assets, [0, 419, 640, 60], &st.strip).draw_text(frame, assets);
@@ -1171,6 +1212,10 @@ pub struct Game {
     held: Vec<(usize, Person, Held)>,
     /// events of the pending command already shown before its question (`Choices::show`)
     early_shown: usize,
+    /// (person, title) awarded among the events shown before a question: the original draws the "Ereignisse"
+    /// banner after the title award, the first thing of the settlement (rules-19 §4 step 1, formats §9.1 `%1N1`;
+    /// live A/B 2026-11-22: "Bürger anna" from the citizen certificate on), while our state is still the old one
+    early_title: Option<(usize, u8)>,
     /// The cradle stays until the second baby sound has ended (rules-19 §2.1 step 10), ms left.
     cry_ms: u32,
     scroll: ReportScroll,
@@ -1220,11 +1265,13 @@ const FATE_IDS: &[(u8, u32)] = &[
 ];
 
 const REPORT_BOX: [i32; 4] = [30, 110, 520, 290];
+/// The full-screen window: scene texts with `$nH` print on its line n (rules-15 §3.2).
+const FULL: [i32; 4] = [0, 0, 640, 480];
 pub(super) const YEAR_BOX: [i32; 4] = [100, 126, 440, 300];
 
 /// Leads a report line that is markup kept from a menu answered in the window (the gifts, rules-63 §2), one char
 /// per byte; its `%m` items are the gem bullets. The char after it is the chosen bullet ('0'..) or '-'.
-const RAW: char = '\u{1}';
+const RAW: char = '\u{4}';
 
 /// An answered menu's markup with its values filled in: number and word items become their text, bullets stay
 /// items (`%m`) so they keep their gems.
@@ -1303,9 +1350,17 @@ fn report_window(assets: &Assets, lines: &[String]) -> Window {
 }
 
 fn report_src(lines: &[String]) -> Vec<u8> {
+    // a plain line ends as its EXE text does (`$N$N` leaves a blank line, rules-21 §2.2 e.g. 0x9F9E0), `$N` when the
+    // text has no break at its end; a leading `$Z`/`$N` is kept as well
+    let codes = |s: &str| -> Vec<u8> { s.chars().flat_map(|c| if c == NL { *b"$N" } else { *b"$Z" }).collect() };
     let line = |l: &String| match l.strip_prefix(RAW) {
         Some(l) => l.chars().skip(1).map(|c| c as u8).collect(),
-        None => [t(l), b"$N".to_vec()].concat(),
+        None => {
+            let lead: String = l.chars().take_while(|&c| c == NL || c == HALF).collect();
+            let trail: String = l.chars().rev().take_while(|&c| c == NL || c == HALF).collect::<Vec<_>>().into_iter().rev().collect();
+            let body = &l[lead.len()..l.len() - trail.len().min(l.len() - lead.len())];
+            [codes(&lead), t(body), if trail.is_empty() { b"$N".to_vec() } else { codes(&trail) }].concat()
+        }
     };
     [b"$L".to_vec(), lines.iter().flat_map(line).collect()].concat()
 }
@@ -1426,6 +1481,7 @@ impl Game {
             before: None,
             held: vec![],
             early_shown: 0,
+            early_title: None,
             cry_ms: 0,
             scroll: ReportScroll::default(),
             scroll_ms: 0,
@@ -1491,6 +1547,7 @@ impl Game {
                 // the turn-end windows already shown before a question (`Choices::show`) are not shown again
                 self.pending_cash = None;
                 let n = std::mem::take(&mut self.early_shown).min(ev.len());
+                self.early_title = None;
                 ev.drain(..n);
                 self.before = Some(old.persons);
                 self.report(assets, ev, ch.log);
@@ -1512,6 +1569,7 @@ impl Game {
                             self.pending_cash = Some(c);
                         }
                         self.early_shown = upto;
+                        self.early_title = new.iter().rev().find_map(|e| if let SimEvent::Title { person, title, .. } = e { Some((*person as usize, *title)) } else { None }).or(self.early_title);
                         // they go before whatever was already waiting, in their own order
                         let waiting: Vec<Popup> = self.popups.drain(..).collect();
                         self.reporting_early = true;
@@ -1669,7 +1727,7 @@ impl Game {
                 && !before.contains(&Self::report_key(p))
             {
                 let skip = self.continued.filter(|c| c.0 == Self::report_key(p)).map_or(0, |c| c.1);
-                new.extend(l.iter().skip(skip).filter(|l| !l.starts_with(RAW)).map(|l| (year, l.clone())));
+                new.extend(l.iter().skip(skip).filter(|l| !l.starts_with(RAW)).map(|l| (year, l.trim_matches([NL, HALF]).to_string())));
             }
         }
         self.log.extend(new);
@@ -1786,13 +1844,16 @@ impl Game {
                     let county = State::jury_county(self.st.persons[*person as usize].loc()) as u16;
                     // rules-18 §12: a juror who has not voted shows the wheel (0x179), a guilty vote the bottle (0x48), an
                     // acquittal nothing; first all twelve wheels, then the result
-                    let caption = subst(&subst(&assets.text(0xC12F4), b"$15H", b""), b"$g", b"");
+                    // rules-15 §6.1 step 3: `$15H$C$g…` printed into the full-screen window (y 372), no box
+                    let caption = assets.text(0xC12F4);
                     let wheels: Vec<(u16, i32, i32)> = (0..12).map(|i| (0x179, 62 + 44 * i, 420)).collect();
                     let result: Vec<(u16, i32, i32)> = (0..*guilty as i32).map(|i| (0x48, 62 + 44 * i, 420)).collect();
-                    self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: wheels, boxes: vec![([10, 330, 620, 70], caption.clone())], anim: None });
-                    self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: result, boxes: vec![([10, 330, 620, 70], caption)], anim: None });
+                    self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: wheels, boxes: vec![(FULL, caption.clone())], anim: None });
+                    self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: result, boxes: vec![(FULL, caption)], anim: None });
                     let who = t(&self.pref(*person, 1, 1));
-                    let (pic, rect, addr) = if !*tower { (0xB8, [10, 220, 620, 100], 0xC1470) } else if *last_branch { (0xB9, [10, 20, 620, 130], 0xC13A8) } else { (0xB9, [10, 20, 620, 130], 0xC1320) };
+                    // step 6: the acquittal is a caption box; step 7: the tower text `$1H$g$4>$4<$C…` goes on line 1 of
+                    // the full-screen window
+                    let (pic, rect, addr) = if !*tower { (0xB8, [10, 220, 620, 100], 0xC1470) } else if *last_branch { (0xB9, FULL, 0xC13A8) } else { (0xB9, FULL, 0xC1320) };
                     let said = match addr { 0xC1470 => 229_950, 0xC13A8 => 229_949, _ => 0 };
                     let src = [if said > 0 { speech(said) } else { vec![] }, b"$C".to_vec(), subst(&assets.text(addr), b"%1N1", &who)].concat();
                     self.popups.push_back(Popup::Scene { pic, boxes: vec![(rect, src)] });
@@ -2465,12 +2526,15 @@ impl Game {
             };
             p.strip_suffix(b"$H").map(<[u8]>::to_vec).unwrap_or(p)
         };
-        // the candidate lines alone first, until a click (live A/B 2026-11-22: 23 s without a click stay)
+        // the candidate lines alone first, until a click (live A/B 2026-11-22: 23 s without a click stay); the
+        // privileged candidate's line 0xC183C stands under them from the start, the one click covers both (rules-44 §3:
+        // every candidate bullet is set to the 1 px glyph 0xCD right after its line, so no gem shows before a prompt)
         let mut steps = vec![ElectStep { strip: vec![], coin: None, timed: false, ask: false }];
-        if privileged && let Some((x, _)) = result {
+        let mut note = vec![];
+        if privileged && let Some(&x) = candidates.first() {
             let q = if self.st.persons[x as usize].gender() & 1 == 1 { "ihr" } else { "sein" };
             let s = subst(&subst(&assets.text(0xC183C), b"%1N4", &t(&self.rank(x as usize))), b"%1N1", &t(&self.pref(x, 1, 1)));
-            steps.push(ElectStep { strip: subst(&s, b"%q", q.as_bytes()), coin: None, timed: false, ask: false });
+            note = subst(&s, b"%q", q.as_bytes());
         }
         for &(el, c) in votes {
             let coin = candidates.iter().position(|&x| x == c);
@@ -2495,7 +2559,7 @@ impl Game {
             };
             steps.push(ElectStep { strip: subst(&text, b"%o", &t(self.loc(loc))), coin: None, timed: false, ask: false });
         }
-        Elect { key: (loc, seat), pic, head, names, steps, pos: 0, ms: 0 }
+        Elect { key: (loc, seat), pic, head, names, note, steps, pos: 0, ms: 0 }
     }
 
     /// Shows `p` as before the reported command until `scene` has left the screen (`held`).
@@ -2538,7 +2602,7 @@ impl Game {
             };
             self.popups.push_back(Form::new(&[b"$Z$L".to_vec(), t(&text)].concat()).popup_at(rect));
         }
-        if let SimEvent::Election { loc, seat, religion, kind, candidates, privileged, winner, .. } = e
+        if let SimEvent::Election { loc, seat, religion, kind, winner, .. } = e
             && let Some(text) = self.describe(assets, e)
         {
             self.hold(*winner as usize, if *kind <= 1 { Held::Elect((*loc, *seat)) } else { Held::Scene(0) });
@@ -2553,27 +2617,20 @@ impl Game {
                 }
                 return;
             }
-            let parts: Vec<&str> = text.split('\n').collect();
-            let n = parts.len();
-            let mut boxes: Vec<([i32; 4], Vec<u8>)> = vec![([0, 400, 640, 80], [b"$C".to_vec(), t(parts[n - 1])].concat())];
-            // a vote waits for a click after the candidate list (rules-44 §3), then the votes come
-            let list = if *kind <= 1 { (1 + candidates.len() + *privileged as usize).min(n - 1) } else { n - 1 };
-            if n - 1 > list {
-                boxes.insert(0, ([0, 330, 640, 150], t(&parts[list..n - 1].join(" "))));
-            }
-            if list > 0 {
-                boxes.insert(0, ([0, 330, 640, 150], t(&parts[..list].join(" "))));
-            }
+            // no election (rules-15 §3.4 step 6): 0xC1978 / 0xC1998 `$8H$C$g…` on line 8 of the place picture
+            let boxes = vec![(FULL, [b"$8H$C$g".to_vec(), t(text.split('\n').next_back().unwrap_or_default())].concat())];
             self.popups.push_back(Popup::Scene { pic, boxes });
             self.held_scene();
         }
         if let SimEvent::Dismissed { person, loc, idx, .. } = e
-            && let Some(text) = self.describe(assets, e)
+            && let Some(src) = self.dismissal_src(assets, e)
         {
             self.hold(*person as usize, Held::Scene(0));
             let o = match *loc { 0..=9 => *idx as usize, 10..=12 => *idx as usize + 10, _ => *idx as usize + 23 };
             let pic = Self::place_picture(*loc, mad_sim::career::is_church_office(o), self.st.persons[*person as usize].religion());
-            self.popups.push_back(Popup::Scene { pic, boxes: vec![([0, 150, 640, 130], [b"$C".to_vec(), t(&text)].concat())] });
+            // rules-15 §3.2/§3.3: the text (`$8H$C$g…`, `$7H` for two or three dismissers) is printed into the
+            // full-screen window on the place picture, line by line with its own `$Z` breaks
+            self.popups.push_back(Popup::Scene { pic, boxes: vec![(FULL, src)] });
             self.held_scene();
         }
         if let SimEvent::PlotNote { kind: 36, id: id @ 0..=2, a, b, c } = e {
@@ -2636,6 +2693,41 @@ impl Game {
         src
     }
 
+    /// The dismissal text (EXE 0xC170C, 0xC1734, 0xC1790; rules-12 §3.7) with its layout codes (`$8H`/`$7H`, `$Z`
+    /// breaks); shown for humans, principality offices and a human's rival only.
+    fn dismissal_src(&self, assets: &Assets, e: &SimEvent) -> Option<Vec<u8>> {
+        let SimEvent::Dismissed { person, by, loc, idx, rival } = e else { return None };
+        if by.is_empty() || by.len() > 3 || !(self.st.persons[*person as usize].human() || *loc >= 13 || *rival != 0xFF) {
+            return None;
+        }
+        let a: Vec<String> = by.iter().map(|&x| self.pref(x, 1, 3)).collect();
+        // the office is already vacated: name the one that was lost
+        let g = (self.st.persons[*person as usize].gender() & 1) as usize;
+        let o = match *loc { 0..=9 => *idx as u32, 10..=12 => *idx as u32 + 10, _ => *idx as u32 + 23 };
+        let noun = self.assets_text_id(if g == 1 { 1407 + o } else { 72 + o });
+        // %0F: the office holder (accusative), or with a rival "%4N3, %2N0 %f" (rules-12 §1.6)
+        let who = match *rival {
+            0xFF => t(&format!("{}, {noun} in {}", self.pref(*person, 4, 1), self.loc(*loc))),
+            r => t(&format!("{}, {} {}", self.pref(*person, 4, 1), self.pref(r, 2, 0), self.gegenspieler(*person))),
+        };
+        let src = match by.len() {
+            1 => subst(&subst(&assets.text(0xC170C), b"%1N3", &t(&a[0])), b"%0F", &who),
+            2 => {
+                let mut s = subst(&subst_seq(&assets.text(0xC1734), b"%1N3", &[t(&a[0]), t(&a[1])]), b"%0F", &who);
+                // the third appointer objected in vain (0xC1768), unless it is the rival's human
+                let apps = self.st.appointers(*loc as usize, *idx as usize);
+                if let (3, Some(&o)) = (apps.len(), apps.iter().find(|&&x| !by.contains(&(x as u8))))
+                    && o as u8 != *rival
+                {
+                    s.extend(subst(&assets.text(0xC1768), b"%3N3", &t(&self.pref(o as u8, 3, 3))));
+                }
+                s
+            }
+            _ => subst(&subst_seq(&assets.text(0xC1790), b"%1N3", &[t(&a[0]), t(&a[1]), t(&a[2])]), b"%0F", &who),
+        };
+        Some(src)
+    }
+
     /// `%kN<n>` of docs/re/rules-12 §1.5: case `k` (1 nominative .. 4 accusative), form `n` 0..6.
     /// The castle or camp property at place `k` (location 14 + k).
     pub(super) fn place_prop(&self, k: u8) -> Option<usize> {
@@ -2649,7 +2741,7 @@ impl Game {
         }
         let pr = self.shown(pi);
         let g = (pr.gender() & 1) as usize;
-        let title_no = pr.title() as usize;
+        let title_no = self.title_of(pi);
         let name = self.first_name(pi);
         let name = if k == 2 { genitive(&name) } else { name };
         let title = self.tables.titles[g].get(title_no.min(9)).cloned().unwrap_or_default();
@@ -2734,8 +2826,14 @@ impl Game {
             return "Niemand".into();
         }
         let pr = self.shown(p);
-        let title = &self.tables.titles[(pr.gender() & 1) as usize][(pr.title() as usize).min(9)];
+        let title = &self.tables.titles[(pr.gender() & 1) as usize][self.title_of(p).min(9)];
         format!("{title} {}", self.first_name(p))
+    }
+
+    /// The title index of `p` as the screen shows it: a title awarded among the turn-end events shown before an open
+    /// question counts already (`early_title`), else the held or current person's.
+    fn title_of(&self, p: usize) -> usize {
+        self.early_title.filter(|e| e.0 == p).map_or(self.shown(p).title() as usize, |e| e.1 as usize)
     }
 
     /// First name: the player's typed name, or the EXE table entry of a computer person.
@@ -3193,9 +3291,10 @@ impl Game {
                 let noun = t(&self.assets_text_id(if g == 1 { 1407 + o } else { 72 + o }));
                 let office_name = t(assets.name_table((0xB4378, 34)).get(o as usize).map_or("", String::as_str));
                 let head = subst(&subst_seq(&assets.text(0xC17C8), b"%s", &[office_name]), b"%o", &t(self.loc(*loc)));
-                // the hidden election shows only its result line (rules-44 §3)
-                let mut parts = if *kind == 3 { vec![] } else { vec![plain(&head)] };
-                let candidates: &[u8] = if *kind == 3 { &[] } else { candidates };
+                // without an election (kinds 2, 3) only the result line on line 8 of the place picture (rules-15 §3.4
+                // step 6, rules-44 §3)
+                let mut parts = if *kind >= 2 { vec![] } else { vec![plain(&head)] };
+                let candidates: &[u8] = if *kind >= 2 { &[] } else { candidates };
                 for (k, &c) in candidates.iter().enumerate() {
                     // 0xC17F8, or 0xC1818 for some human's rival: "%1N0, %2N0 %f"
                     let s = match rivals.get(k).copied().filter(|&r| r != 0xFF) {
@@ -3842,34 +3941,7 @@ impl Game {
                 format!("{head} {}", plain(&body))
             }
             // dismissal by 1..3 computer appointers (EXE 0xC170C, 0xC1734, 0xC1790; rules-12 §3.7)
-            Dismissed { person, by, loc, idx, rival } if !by.is_empty() && by.len() <= 3 && (self.st.persons[*person as usize].human() || *loc >= 13 || *rival != 0xFF) => {
-                let a: Vec<String> = by.iter().map(|&x| self.pref(x, 1, 3)).collect();
-                // the office is already vacated: name the one that was lost
-                let g = (self.st.persons[*person as usize].gender() & 1) as usize;
-                let o = match *loc { 0..=9 => *idx as u32, 10..=12 => *idx as u32 + 10, _ => *idx as u32 + 23 };
-                let noun = self.assets_text_id(if g == 1 { 1407 + o } else { 72 + o });
-                // %0F: the office holder (accusative), or with a rival "%4N3, %2N0 %f" (rules-12 §1.6)
-                let who = match *rival {
-                    0xFF => t(&format!("{}, {noun} in {}", self.pref(*person, 4, 1), self.loc(*loc))),
-                    r => t(&format!("{}, {} {}", self.pref(*person, 4, 1), self.pref(r, 2, 0), self.gegenspieler(*person))),
-                };
-                let src = match by.len() {
-                    1 => subst(&subst(&assets.text(0xC170C), b"%1N3", &t(&a[0])), b"%0F", &who),
-                    2 => {
-                        let mut s = subst(&subst_seq(&assets.text(0xC1734), b"%1N3", &[t(&a[0]), t(&a[1])]), b"%0F", &who);
-                        // the third appointer objected in vain (0xC1768), unless it is the rival's human
-                        let apps = self.st.appointers(*loc as usize, *idx as usize);
-                        if let (3, Some(&o)) = (apps.len(), apps.iter().find(|&&x| !by.contains(&(x as u8))))
-                            && o as u8 != *rival
-                        {
-                            s.extend(subst(&assets.text(0xC1768), b"%3N3", &t(&self.pref(o as u8, 3, 3))));
-                        }
-                        s
-                    }
-                    _ => subst(&subst_seq(&assets.text(0xC1790), b"%1N3", &[t(&a[0]), t(&a[1]), t(&a[2])]), b"%0F", &who),
-                };
-                plain(&src)
-            }
+            Dismissed { .. } => plain(&self.dismissal_src(assets, e)?),
             // divine events (rules-12 §3.10, text id 2350 + kind); the tornado (8) needs nine more numbers
             // tornado (EXE text id 2358, rules-15 §4.1): the nine numbers in text order
             Tornado { a, b, n, churches, museums, hospitals } => {
@@ -4036,7 +4108,6 @@ impl Game {
             // seizures and sales told elsewhere or not at all
             ReliefNoSiege { .. } => return None,
             Returned { .. } | TransportersBuilt { .. } | CargoDamaged { .. } | MissionDone { .. } | BranchSold { .. } => return None,
-            Dismissed { .. } => return None, // shown only for humans and principality offices (above)
             TurnEndCash { .. } => return None, // the turn-end report's banner cash
             other => format!("{other:?}"),
         })
@@ -6632,6 +6703,34 @@ pub(crate) mod tests {
         assert!(matches!(scenes.last(), Some(Popup::Film(f)) if f.song.is_none() && f.voice.as_deref() == Some("0000013")), "the outro ends it, spoken");
     }
 
+    /// The banner of the turn-end windows before a question shows the title awarded at the start of the settlement
+    /// (rules-19 §4 step 1; live A/B 2026-11-22 "Bürger anna"), although the state is still the old one.
+    #[test]
+    fn real_early_title_in_banner() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap();
+        g.st.year = 1601; // rules-03 §2.1: title 1 comes in 1601
+        let (c, fee, w) = g.st.matchmaker_offer(h).expect("a candidate");
+        g.st.start_courtship(h, c, fee, w);
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        assert!(g.person_name(h as u8).starts_with("Herr "), "{}", g.person_name(h as u8));
+        g.act(Action::EndTurn, &mut ctx);
+        assert!(matches!(g.pending.as_ref().map(|p| &p.ask), Some(Ask::Gift { .. })), "{:?}", g.pending.as_ref().map(|p| &p.ask));
+        assert_eq!(g.st.persons[h].title(), 0, "the state is still the old one");
+        assert!(g.person_name(h as u8).starts_with("Bürger "), "{}", g.person_name(h as u8));
+        let banner = g.banner_text(b"Ereignisse");
+        assert!(banner.windows(7).any(|w| w == b"B\x81rger "), "{}", String::from_utf8_lossy(&banner));
+        g.act(Action::Answer(3), &mut ctx);
+        if g.pending.is_none() {
+            assert!(g.early_title.is_none());
+            assert_eq!(g.st.persons[h].title(), 1);
+        }
+        assert!(g.person_name(h as u8).starts_with("Bürger "), "{}", g.person_name(h as u8));
+    }
+
     /// A courtship year asks for a gift; refusing costs nothing (rules-05 §3).
     #[test]
     fn real_courtship_gift_dialog() {
@@ -7250,6 +7349,12 @@ pub(crate) mod tests {
         g.popups.clear();
         g.popups.push_back(Popup::Report(vec!["Ihr zahlt Eure jährliche Geldstrafe von 120 Talern.".into(), "Euer Sohn Hans ist verstorben.".into()]));
         shot(&g, &assets, "report_window");
+        // consecutive events are separated by a blank line: their texts end with `$N$N` (live A/B 2026-11-22)
+        g.popups.clear();
+        let me = g.me().unwrap() as u8;
+        g.report(&assets, vec![SimEvent::Fine { person: me, amount: 120 }, SimEvent::Fine { person: me, amount: 130 }, SimEvent::BlackmailEnded { by: me }], vec![]);
+        assert!(matches!(g.popups.front(), Some(Popup::Report(l)) if l.len() == 3 && l[0].ends_with(&format!("{NL}{NL}"))), "{:?}", g.popups.front().map(|p| matches!(p, Popup::Report(_))));
+        shot(&g, &assets, "report_blank_lines");
         g.popups.clear();
         g.report(&assets, vec![SimEvent::Bill { wages: 0, troops: 0, robbers: 0, means: 0, transport: 0, toll: 0, directors: 0, tax: 0, tithe: 0, spies: 0, saboteurs: 0, interest: 0, insurance: 0, cash: 0 }], vec![]);
         shot(&g, &assets, "report_nothing");
@@ -7429,6 +7534,19 @@ pub(crate) mod tests {
         assert_eq!((el.pic, el.names.len(), el.steps.len()), (0xC1, 2, 4));
         assert_eq!(el.steps.iter().map(|st| (st.coin, st.timed)).collect::<Vec<_>>(), vec![(None, false), (None, true), (Some(1), true), (None, false)]);
         shot(&g, &assets, "election_scene");
+        // a privileged candidate: his line 0xC183C under the single candidate line, no gem, one click (rules-44 §3)
+        let mut g2 = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g2.popups.clear();
+        g2.report(&assets, vec![SimEvent::Election { loc: 13, seat: 8, candidates: vec![c], votes: vec![(h, c)], winner: c, kind: 0, rivals: vec![0xFF], privileged: true, religion: 0 }], vec![]);
+        let Some(Popup::Election(el)) = g2.popups.front() else { panic!("the election screen") };
+        assert!(el.names.len() == 1 && el.steps.len() == 4 && !el.steps[1].strip.starts_with(b"$N") && plain(&el.note).contains("Privilegs"), "{}", plain(&el.note));
+        shot(&g2, &assets, "election_privileged");
+        // no election (kind 3, a human's rival won unseen): 0xC1978 alone on line 8 of the place picture (step 6)
+        g2.popups.clear();
+        g2.report(&assets, vec![SimEvent::Election { loc: 3, seat: 6, candidates: vec![c], votes: vec![], winner: c, kind: 3, rivals: vec![h], privileged: false, religion: 0 }], vec![]);
+        let Some(Popup::Scene { pic: 0xC1, boxes }) = g2.popups.front() else { panic!("the place picture: {:?}", g2.popups.front().map(|p| matches!(p, Popup::Scene { .. }))) };
+        assert!(boxes.len() == 1 && boxes[0].0 == FULL && boxes[0].1.starts_with(b"$8H$C$g") && plain(&boxes[0].1).contains("wird"), "{}", String::from_utf8_lossy(&boxes[0].1));
+        shot(&g2, &assets, "election_none");
         let mut audio = crate::audio::Audio::new(false);
         let mut ctx = ctx_for(&assets, &mut audio);
         // the candidate lines wait for a click, then the votes run timed
@@ -8657,8 +8775,16 @@ pub(crate) mod tests {
 
     #[test]
     fn plain_strips_codes() {
-        assert_eq!(plain(b"$C1601 - Ihr bekamt $$ einen Sohn...$N"), "1601 - Ihr bekamt $ einen Sohn...");
+        assert_eq!(plain(b"$C1601 - Ihr bekamt $$ einen Sohn...$N"), format!("1601 - Ihr bekamt $ einen Sohn...{NL}"));
         assert_eq!(plain(b"-$E$6>5 m$18c Lagerraum$|"), "-5 m² Lagerraum");
+        // the breaks at both ends come back in the report window, one `$N` when the text has none (0xAC911 "...ab...")
+        assert_eq!(plain(b"$Z$LDie Belagerung wird fortgesetzt.$N$N"), format!("{HALF}Die Belagerung wird fortgesetzt.{NL}{NL}"));
+        assert_eq!(plain(b"$LA$N$H"), format!("A{NL}"));
+        assert_eq!(plain(b"$LA$Nnein$N$$N"), "A nein $N");
+        let src = |l: &str| String::from_utf8(report_src(&[l.to_string()])).unwrap();
+        assert_eq!(src(&format!("{HALF}Die Belagerung.{NL}{NL}")), "$L$ZDie Belagerung.$N$N");
+        assert_eq!(src("Nichts"), "$LNichts$N");
+        assert_eq!(src(&format!("A{NL} B{NL}")), "$LA B$N");
     }
 
     /// rules-61: accepting the matchmaker's offer shows the candidate's portrait (no draw) under two click captions,
@@ -8723,7 +8849,7 @@ pub(crate) mod tests {
                 intros += 1;
                 let Some(Popup::Battle(v)) = g.popups.front() else { panic!("the field opens with the captions") };
                 let (caps, pos) = v.captions();
-                let caps: Vec<String> = caps.iter().map(|c| plain(c)).collect();
+                let caps: Vec<String> = caps.iter().map(|c| plain(c).replace([NL, HALF], "")).collect();
                 assert_eq!((caps.len(), pos), (4, 0), "{caps:#?}");
                 assert!(caps.iter().all(|c| !c.contains('%')), "{caps:#?}");
                 let place = g.loc(intro.loc).to_string();
