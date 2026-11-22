@@ -28,7 +28,7 @@ use winit::{
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key as WKey, NamedKey},
-    window::{Window, WindowId},
+    window::{Fullscreen, Window, WindowId},
 };
 
 /// Fixed logic tick. Films advance by their own per-frame delay, accumulated over ticks.
@@ -165,6 +165,8 @@ struct App {
     window: Option<(Rc<Window>, Surface)>,
     last: Instant,
     acc: Duration,
+    /// Alt held (for Alt+Enter).
+    alt: bool,
 }
 
 impl ApplicationHandler for App {
@@ -175,6 +177,7 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("Mittelland AD")
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 960))
+            .with_fullscreen(self.game.assets.prefs.borrow().fullscreen.then(|| Fullscreen::Borderless(None)))
             .with_window_icon(window_icon());
         let w = Rc::new(el.create_window(attrs).expect("create window"));
         w.set_cursor_visible(false); // the game draws its own pointer
@@ -188,10 +191,12 @@ impl ApplicationHandler for App {
         let Some((w, surface)) = &mut self.window else { return };
         let input = &mut self.game.input;
         let size = w.inner_size();
+        let integer = self.game.assets.prefs.borrow().integer_scale;
         match event {
             WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::ModifiersChanged(m) => self.alt = m.state().alt_key(),
             WindowEvent::CursorMoved { position, .. } => {
-                if let Some(p) = gfx::to_frame(gfx::fit(size.width as usize, size.height as usize), position.x, position.y) {
+                if let Some(p) = gfx::to_frame(gfx::fit(size.width as usize, size.height as usize, integer), position.x, position.y) {
                     input.mouse = p;
                 }
             }
@@ -207,6 +212,16 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => input.held = None,
+            // F11 / Alt+Enter: fullscreen, remembered in prefs.txt; the window follows in `about_to_wait`
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && (event.logical_key == WKey::Named(NamedKey::F11) || self.alt && event.logical_key == WKey::Named(NamedKey::Enter)) =>
+            {
+                let mut p = self.game.assets.prefs.borrow_mut();
+                p.fullscreen ^= true;
+                if let Err(e) = p.save(&self.game.assets.user_saves) {
+                    eprintln!("prefs: {e}");
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 let key = match &event.logical_key {
                     WKey::Named(NamedKey::Escape) => Some(Key::Escape),
@@ -221,7 +236,7 @@ impl ApplicationHandler for App {
                 surface.resize(dw, dh).expect("resize surface");
                 self.game.render();
                 let mut buf = surface.buffer_mut().expect("surface buffer");
-                self.game.frame.present(&mut buf, size.width as usize, size.height as usize);
+                self.game.frame.present(&mut buf, size.width as usize, size.height as usize, integer);
                 buf.present().expect("present");
             }
             _ => {}
@@ -234,13 +249,21 @@ impl ApplicationHandler for App {
         // Cap catch-up after a stall (window drag, breakpoint) at 100 ms.
         self.acc = (self.acc + (now - self.last)).min(tick * 10);
         self.last = now;
+        // Tempo (Extras): several logic ticks per real tick; `tick` clears the events, so only the first sees them
+        let speed = self.game.assets.prefs.borrow().speed.max(1);
         while self.acc >= tick {
             self.acc -= tick;
-            if !self.game.tick() {
-                return el.exit();
+            for _ in 0..speed {
+                if !self.game.tick() {
+                    return el.exit();
+                }
             }
         }
         if let Some((w, _)) = &self.window {
+            let full = self.game.assets.prefs.borrow().fullscreen;
+            if w.fullscreen().is_some() != full {
+                w.set_fullscreen(full.then(|| Fullscreen::Borderless(None)));
+            }
             w.request_redraw();
         }
         el.set_control_flow(ControlFlow::WaitUntil(now + tick - self.acc));
@@ -295,6 +318,6 @@ fn main() {
     }
 
     let el = EventLoop::new().expect("event loop");
-    let mut app = App { game, window: None, last: Instant::now(), acc: Duration::ZERO };
+    let mut app = App { game, window: None, last: Instant::now(), acc: Duration::ZERO, alt: false };
     el.run_app(&mut app).expect("event loop");
 }

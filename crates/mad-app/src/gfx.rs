@@ -125,8 +125,8 @@ impl Frame {
         }
     }
 
-    /// Converts to 0x00RRGGBB, scaled into a `dw`x`dh` buffer at `r` (nearest neighbour); the rest is black.
-    pub fn present(&self, out: &mut [u32], dw: usize, dh: usize) {
+    /// Converts to 0x00RRGGBB, scaled into a `dw`x`dh` buffer at [`fit`] (nearest neighbour); the rest is black.
+    pub fn present(&self, out: &mut [u32], dw: usize, dh: usize, integer: bool) {
         if dw == 0 || dh == 0 {
             return;
         }
@@ -135,7 +135,7 @@ impl Frame {
         } else {
             self.palette.iter().map(|&[r, g, b]| u32::from_be_bytes([0, r, g, b])).collect()
         };
-        let r = fit(dw, dh);
+        let r = fit(dw, dh, integer);
         out.fill(0);
         for y in 0..r.h {
             let sy = y * H / r.h;
@@ -162,10 +162,10 @@ pub struct Rect {
     pub h: usize,
 }
 
-/// Where the 640x480 picture goes in a `dw`x`dh` window: largest integer scale that fits, centred;
-/// below 1x, the largest 4:3 rectangle that fits.
-pub fn fit(dw: usize, dh: usize) -> Rect {
-    let s = (dw / W).min(dh / H);
+/// Where the 640x480 picture goes in a `dw`x`dh` window, centred: the largest 4:3 rectangle that fits, or
+/// with `integer` (Extras) the largest whole multiple of 640x480 (sharp pixels; below 1x the 4:3 rectangle).
+pub fn fit(dw: usize, dh: usize, integer: bool) -> Rect {
+    let s = if integer { (dw / W).min(dh / H) } else { 0 };
     let (w, h) = if s >= 1 { (W * s, H * s) } else if dw * H < dh * W { (dw, dw * H / W) } else { (dh * W / H, dh) };
     let (w, h) = (w.max(1).min(dw.max(1)), h.max(1).min(dh.max(1)));
     Rect { x: (dw - w.min(dw)) / 2, y: (dh - h.min(dh)) / 2, w, h }
@@ -199,16 +199,21 @@ mod tests {
 
     #[test]
     fn fit_integer_and_fractional() {
-        assert_eq!(fit(640, 480), Rect { x: 0, y: 0, w: 640, h: 480 });
-        assert_eq!(fit(1920, 1080), Rect { x: 320, y: 60, w: 1280, h: 960 });
-        assert_eq!(fit(1300, 1000), Rect { x: 10, y: 20, w: 1280, h: 960 });
-        assert_eq!(fit(320, 480), Rect { x: 0, y: 120, w: 320, h: 240 });
-        assert_eq!(fit(0, 0).w, 1);
+        assert_eq!(fit(640, 480, false), Rect { x: 0, y: 0, w: 640, h: 480 });
+        assert_eq!(fit(1920, 1080, false), Rect { x: 240, y: 0, w: 1440, h: 1080 });
+        assert_eq!(fit(1920, 1080, true), Rect { x: 320, y: 60, w: 1280, h: 960 });
+        assert_eq!(fit(1300, 1000, false), Rect { x: 0, y: 12, w: 1300, h: 975 });
+        assert_eq!(fit(1300, 1000, true), Rect { x: 10, y: 20, w: 1280, h: 960 });
+        assert_eq!(fit(2560, 1440, true), Rect { x: 320, y: 0, w: 1920, h: 1440 });
+        // below 1x both fall back to the 4:3 rectangle
+        assert_eq!(fit(320, 480, false), Rect { x: 0, y: 120, w: 320, h: 240 });
+        assert_eq!(fit(320, 480, true), Rect { x: 0, y: 120, w: 320, h: 240 });
+        assert_eq!(fit(0, 0, true).w, 1);
     }
 
     #[test]
     fn window_to_frame() {
-        let r = fit(1920, 1080);
+        let r = fit(1920, 1080, true);
         assert_eq!(to_frame(r, 320.0, 60.0), Some((0, 0)));
         assert_eq!(to_frame(r, 1599.9, 1019.9), Some((639, 479)));
         assert_eq!(to_frame(r, 319.0, 500.0), None);
@@ -240,7 +245,7 @@ mod tests {
         f.blit_idx(&Image { width: 1, height: 1, pixels: vec![7], opaque: vec![true] }, 3, 0);
         assert_eq!(f.pixels[3], rgb555(pal[7]));
         let mut out = vec![0u32; 640 * 480];
-        f.present(&mut out, 640, 480);
+        f.present(&mut out, 640, 480, false);
         assert_eq!(out[3], 0x00FF0800);
     }
 }
