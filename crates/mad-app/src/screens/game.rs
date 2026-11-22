@@ -4846,8 +4846,9 @@ impl Game {
     /// stairs, the court room up to (not including) the verdict animation, the creditors' jury before its outcome.
     fn skippable(&self, p: &Popup) -> bool {
         match p {
-            // elections and dismissals (rules-15 §3): not while the human still votes; the result is in the sim already
-            Popup::Election(el) => !el.steps[el.pos.min(el.steps.len())..].iter().any(|s| s.ask),
+            // elections and dismissals (rules-15 §3): the result is in the sim already; only the human's open vote
+            // prompt stays (Space runs up to it, `skip_scenes`)
+            Popup::Election(el) => !self.live_vote(el) || el.pos + 1 < el.steps.len(),
             // the finished election and dismissal scenes are the ones holding a person (`held`)
             Popup::Scene { boxes, .. } if self.held.iter().any(|h| h.2 == Held::Scene(boxes.as_ptr() as usize)) => true,
             Popup::Scene { pic: 0xC1, .. } => true,
@@ -4865,10 +4866,22 @@ impl Game {
     fn skip_scenes(&mut self) -> bool {
         let mut any = false;
         while self.popups.front().is_some_and(|p| self.skippable(p)) {
+            if let Some(Popup::Election(el)) = self.popups.front()
+                && self.live_vote(el)
+            {
+                let Some(Popup::Election(el)) = self.popups.front_mut() else { unreachable!() };
+                (el.pos, el.ms) = (el.steps.len() - 1, 0);
+                return true;
+            }
             self.popups.pop_front();
             any = true;
         }
         any
+    }
+
+    /// The election screen ends on the human's vote prompt the sim waits for (an answered vote is followed by its coin).
+    fn live_vote(&self, el: &Elect) -> bool {
+        matches!(self.pending.as_ref().map(|p| &p.ask), Some(Ask::Vote { .. })) && el.steps.last().is_some_and(|s| s.ask)
     }
 
     /// Ours: a one-line gold hint at the bottom of a full-screen scene.
@@ -7317,11 +7330,21 @@ pub(crate) mod tests {
         let mut audio = crate::audio::Audio::new(false);
         let mut ctx = ctx_for(&assets, &mut audio);
         let space = Input { events: vec![Event::Key(Key::Char(b' '))], ..Default::default() };
+        // a live vote: Space runs up to the prompt, which stays
         let vote = g.election_screen(&assets, (3, 6), 0xC1, &[c, h], &[0xFF, 0xFF], false, &[(e, c)], None, Some((h, 0xFF)));
         g.popups.push_back(Popup::Election(Box::new(vote)));
+        g.pending = Some(Pending { cmd: None, answers: vec![], ask: Ask::Vote { elector: h, candidates: vec![c, h], for_: 0xFF, loc: 3, seat: 6, religion: 0, rivals: vec![0xFF, 0xFF], privileged: false, votes: vec![(e, c)] } });
         g.update(&mut ctx, &space, 0);
-        assert!(matches!(g.popups.front(), Some(Popup::Election(_))), "the vote prompt stays");
+        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 3), "on the prompt");
+        g.update(&mut ctx, &space, 0);
+        assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 3), "the prompt stays");
         g.popups.clear();
+        g.pending = None;
+        // a finished election with the human's answered vote in it goes
+        let done = g.election_screen(&assets, (3, 6), 0xC1, &[c, h], &[0xFF, 0xFF], false, &[(e, c), (h, h)], Some((h, 1)), None);
+        g.popups.push_back(Popup::Election(Box::new(done)));
+        g.update(&mut ctx, &space, 0);
+        assert!(g.popups.is_empty(), "the answered vote does not hold the screen");
         g.report(&assets, vec![SimEvent::Election { loc: 3, seat: 6, candidates: vec![c, h], votes: vec![(c, h)], winner: c, kind: 0, rivals: vec![0xFF, 0xFF], privileged: false, religion: 1 }], vec![]);
         g.report(&assets, vec![SimEvent::Dismissed { person: e, by: vec![c], loc: 3, idx: 6, rival: 0xFF }], vec![]);
         assert!(g.popups.iter().any(|p| matches!(p, Popup::Election(_))));
