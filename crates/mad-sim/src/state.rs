@@ -362,6 +362,23 @@ pub struct State {
     /// Pictures of the battles with a human attacker or defender, in event order (`fight::Replay`);
     /// the app takes them. Not saved.
     pub replays: Vec<crate::fight::Replay>,
+    /// House rules (modern options, ours only; off = the original's rules). Not saved: the app sets them.
+    pub house: House,
+}
+
+/// Optional rule changes; `House::default()` is the original game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct House {
+    /// Debt stage 5 always goes to the jury instead of rolling for the last branch (rules-02 §10.2).
+    pub debt_mercy: bool,
+    /// Largest worker count of a production order (the original: 40).
+    pub max_workers: u8,
+}
+
+impl Default for House {
+    fn default() -> Self {
+        Self { debt_mercy: false, max_workers: 40 }
+    }
 }
 
 impl State {
@@ -389,6 +406,7 @@ impl State {
             last_amount: -1,
             szenario: vec![],
             replays: vec![],
+            house: House::default(),
         }
         .seeded(seed)
     }

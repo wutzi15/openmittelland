@@ -496,6 +496,8 @@ enum Menu {
     Laws(u8),
     /// Spieloptionen sub-pages (rules-00 option flags, EXE 0xBE845..).
     Options,
+    /// Modern options (ours, `prefs.rs`), opened from the bottom of the Optionen window.
+    Extras,
     /// The player's privileges (rules-04b §4.1).
     Privileges,
     Music,
@@ -600,6 +602,24 @@ enum Opt {
     Voice,
     Film,
     Scroll,
+    /// A modern option (`prefs.rs`), by its key.
+    Pref(Pref),
+}
+
+/// Keys of the Extras window, in display order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pref {
+    Fullscreen,
+    IntegerScale,
+    Speed,
+    Autosave,
+    Undo,
+    Tooltips,
+    Warnings,
+    Lang,
+    ProductionHelp,
+    DebtMercy,
+    MoreWorkers,
 }
 
 #[derive(Clone, Debug)]
@@ -1212,6 +1232,8 @@ impl Game {
             chronicle: assets.exe_bytes(0xB518C, 4 * 100).chunks(4).map(|c| 0x80000 + u32::from_le_bytes(c.try_into().unwrap())).collect(),
         };
         let cfg = |o: usize, default| assets.config.borrow().as_ref().map_or(default, |c| c.raw[o]);
+        let mut st = st;
+        st.house = assets.prefs.borrow().house();
         let mut g = Self {
             st,
             tables,
@@ -4323,6 +4345,26 @@ impl Game {
                     Opt::Voice => self.opts ^= 0x80,
                     Opt::Film => self.black_box = !self.black_box,
                     Opt::Scroll => self.text_speed = (self.text_speed + 1) % 6,
+                    Opt::Pref(k) => {
+                        let mut p = ctx.assets.prefs.borrow_mut();
+                        match k {
+                            Pref::Fullscreen => p.fullscreen ^= true,
+                            Pref::IntegerScale => p.integer_scale ^= true,
+                            Pref::Speed => p.speed = p.speed % 4 + 1,
+                            Pref::Autosave => p.autosave_years = match p.autosave_years { 0 => 1, 1 => 5, 5 => 10, _ => 0 },
+                            Pref::Undo => p.undo ^= true,
+                            Pref::Tooltips => p.tooltips ^= true,
+                            Pref::Warnings => p.warnings ^= true,
+                            Pref::Lang => p.lang = if p.lang == crate::prefs::Lang::De { crate::prefs::Lang::En } else { crate::prefs::Lang::De },
+                            Pref::ProductionHelp => p.production_help ^= true,
+                            Pref::DebtMercy => p.debt_mercy ^= true,
+                            Pref::MoreWorkers => p.more_workers ^= true,
+                        }
+                        self.st.house = p.house();
+                        if let Err(e) = p.save(&ctx.assets.user_saves) {
+                            eprintln!("prefs: {e}");
+                        }
+                    }
                 }
                 // the Musik screen saves the config when it is left; the others wait for the next save point (rules-44 §1.1)
                 if m == Menu::Music {
@@ -7103,6 +7145,17 @@ pub(crate) mod tests {
         g.update(&mut ctx, &crate::input::Input::default(), 600);
         assert_eq!(g.ert_reveal.0, 1);
         shot(&g, &assets, "ertraege_ab");
+    }
+
+    /// Ours: the Extras window (modern options) and one toggle written to prefs.txt.
+    #[test]
+    fn real_extras_window() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        g.open(&assets, Menu::Extras);
+        shot(&g, &assets, "extras");
+        assert!(g.st.house == mad_sim::state::House::default());
     }
 
     /// Live A/B screens of the 1600 capture (player "anna", 57 Taler, no office): Nächster Spieler, Kontor 1601, bill.

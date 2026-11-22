@@ -19,6 +19,8 @@ pub struct Assets {
     pub user_saves: PathBuf,
     /// Video mode 3 (`ICONS3`, 15-bit colour): the original's default. Mode 2 is the 8-bit `ICONS2`.
     pub hicolor: bool,
+    /// Modern options (`prefs.txt` in [`Self::user_saves`]).
+    pub prefs: RefCell<crate::prefs::Prefs>,
     exe: Vec<u8>,
     index: iconin::IconIndex,
     index3: Option<iconin::IconIndex>,
@@ -55,6 +57,7 @@ impl Assets {
             exe,
             config: RefCell::new(config),
             saves,
+            prefs: RefCell::new(crate::prefs::Prefs::load(&user_saves)),
             user_saves,
             icons: RefCell::default(),
             root,

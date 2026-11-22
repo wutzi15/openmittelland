@@ -12,6 +12,7 @@ mod assets;
 mod audio;
 mod gfx;
 mod input;
+mod prefs;
 mod screens;
 mod setup;
 mod text;
