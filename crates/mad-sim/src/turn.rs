@@ -248,12 +248,13 @@ impl State {
         skip
     }
 
-    /// rules-01 §3.3 city growth, 3 RNG calls per city.
+    /// rules-01 §3.3 city growth, 3 RNG calls per city. The product is 32-bit unsigned: past about 4.09 million
+    /// it wraps and the city drops to a few ten thousand (the original's long run, FIDELITY "Passive long run" 6).
     pub fn city_growth(&mut self) {
         for c in 0..CITIES {
             let p = self.cities[c].population();
             let g = 1000 + self.r(50);
-            self.cities[c].set_population((p as u64 * g as u64 / 1000) as u32);
+            self.cities[c].set_population(p.wrapping_mul(g) / 1000);
             let r = self.cities[c].rights().wrapping_add(self.r(200));
             self.cities[c].set_rights(r);
             if self.r(100) < 7 {
@@ -1592,6 +1593,12 @@ mod tests {
             let p = st.cities[c].population();
             assert!(p >= before[c] && p <= before[c] * 1049 / 1000);
         }
+    }
+
+    /// The original's 1873 autosaves: Lichterheide 4 243 380 grows by 1.4 % and wraps to 7 820.
+    #[test]
+    fn rules01_s3_3_growth_wraps() {
+        assert_eq!(4_243_380u32.wrapping_mul(1014) / 1000, 7820);
     }
 
     /// Long run: 60 years with two players without panics.
