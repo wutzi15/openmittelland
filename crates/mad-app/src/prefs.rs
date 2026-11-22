@@ -52,7 +52,7 @@ pub struct Prefs {
     pub confirmations: bool,
     /// Office info: resting on an office in the office tree tells who appoints it, the applicants and the likely vote.
     pub office_info: bool,
-    /// Court scenes: Space jumps to the verdict (the questions are still asked, the dice are the same).
+    /// Court, funeral, election and dismissal scenes: Space skips them (the questions are still asked, the dice are the same).
     pub skip_trial: bool,
     /// Auction: Tab resolves the current lot without you, at once (the computers bid as if you kept silent).
     pub skip_lot: bool,

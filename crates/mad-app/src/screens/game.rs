@@ -4842,10 +4842,14 @@ impl Game {
 
     /// Whether the item under `pos` is a number field (auto-repeat target).
     /// Ours (`prefs.skip_trial`, "Szenen überspringen"): whether the front popup is a court presentation or part of the
-    /// funeral that can be skipped. Court: the charge on the
+    /// funeral, an election or a dismissal that can be skipped. Court: the charge on the
     /// stairs, the court room up to (not including) the verdict animation, the creditors' jury before its outcome.
-    fn court_skippable(p: &Popup) -> bool {
+    fn skippable(&self, p: &Popup) -> bool {
         match p {
+            // elections and dismissals (rules-15 §3): not while the human still votes; the result is in the sim already
+            Popup::Election(el) => !el.steps[el.pos.min(el.steps.len())..].iter().any(|s| s.ask),
+            // the finished election and dismissal scenes are the ones holding a person (`held`)
+            Popup::Scene { boxes, .. } if self.held.iter().any(|h| h.2 == Held::Scene(boxes.as_ptr() as usize)) => true,
             Popup::Scene { pic: 0xC1, .. } => true,
             Popup::Court { pic: 0xC6, anim, figures, .. } => *anim != Some((100, 133)) && !figures.is_empty(),
             Popup::Court { pic: 0x193..=0x19F, .. } => true,
@@ -4858,9 +4862,9 @@ impl Game {
 
     /// Ours (`prefs.skip_trial`): drop the court popups in front up to the verdict. Only popups go; the sim's state,
     /// draws and the questions (asked before the scene is queued) are untouched. Returns whether anything was dropped.
-    fn skip_court(&mut self) -> bool {
+    fn skip_scenes(&mut self) -> bool {
         let mut any = false;
-        while self.popups.front().is_some_and(Self::court_skippable) {
+        while self.popups.front().is_some_and(|p| self.skippable(p)) {
             self.popups.pop_front();
             any = true;
         }
@@ -5342,7 +5346,7 @@ impl Screen for Game {
         if matches!(self.popups.front(), Some(Popup::Film(_)))
             && input.events.contains(&Event::Key(Key::Char(b' ')))
             && ctx.assets.prefs.borrow().skip_trial
-            && self.skip_court()
+            && self.skip_scenes()
         {
             return Next::Stay;
         }
@@ -5645,7 +5649,7 @@ impl Screen for Game {
                 }
             }
             // ours (`prefs.skip_trial`): Space drops the court's presentation up to the verdict
-            if matches!(*e, Event::Key(Key::Char(b' '))) && ctx.assets.prefs.borrow().skip_trial && self.skip_court() {
+            if matches!(*e, Event::Key(Key::Char(b' '))) && ctx.assets.prefs.borrow().skip_trial && self.skip_scenes() {
                 continue;
             }
             if let Some(Popup::Scene { boxes, .. } | Popup::Court { boxes, .. }) = self.popups.front()
@@ -5920,7 +5924,7 @@ impl Game {
                     }
                 }
                 p.window(assets, &[]).unwrap().draw_text(frame, assets);
-                if assets.prefs.borrow().skip_trial && Self::court_skippable(p) {
+                if assets.prefs.borrow().skip_trial && self.skippable(p) {
                     Self::draw_hint(frame, assets, assets.prefs.borrow().tr("Leertaste: überspringen", "Space: skip"));
                 }
                 return Some(Cursor::Arrow);
@@ -5932,14 +5936,17 @@ impl Game {
                 self.reveal.as_ref().unwrap().1.draw(frame, &full);
                 return Some(Cursor::Arrow);
             }
-            Some(Popup::Election(el)) => {
+            Some(p @ Popup::Election(el)) => {
                 el.draw(frame, assets, self.scene_ms.0 / 10, mouse);
+                if assets.prefs.borrow().skip_trial && self.skippable(p) {
+                    Self::draw_hint(frame, assets, assets.prefs.borrow().tr("Leertaste: überspringen", "Space: skip"));
+                }
                 return Some(Cursor::Arrow);
             }
             Some(p @ Popup::Scene { pic, .. }) => {
                 frame.blit(&assets.icon(*pic)[0], 0, 0);
                 p.window(assets, &[]).unwrap().draw_text(frame, assets);
-                if assets.prefs.borrow().skip_trial && Self::court_skippable(p) {
+                if assets.prefs.borrow().skip_trial && self.skippable(p) {
                     Self::draw_hint(frame, assets, assets.prefs.borrow().tr("Leertaste: überspringen", "Space: skip"));
                 }
                 return Some(Cursor::Arrow);
@@ -7295,6 +7302,34 @@ pub(crate) mod tests {
         let mut ctx = ctx_for(&assets, &mut audio);
         g.update(&mut ctx, &crate::input::Input::default(), 10);
         assert_ne!(g.rank(h), "ohne Amt");
+    }
+
+    /// Ours (`prefs.skip_trial`): Space skips a finished election and a dismissal, never the human's vote prompt.
+    #[test]
+    fn real_skip_election() {
+        let Some(assets) = test_assets() else { return };
+        assets.prefs.borrow_mut().skip_trial = true;
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap() as u8;
+        let comp: Vec<u8> = g.st.computers().map(|p| p as u8).collect();
+        let (c, e) = (comp[0], comp[1]);
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        let space = Input { events: vec![Event::Key(Key::Char(b' '))], ..Default::default() };
+        let vote = g.election_screen(&assets, (3, 6), 0xC1, &[c, h], &[0xFF, 0xFF], false, &[(e, c)], None, Some((h, 0xFF)));
+        g.popups.push_back(Popup::Election(Box::new(vote)));
+        g.update(&mut ctx, &space, 0);
+        assert!(matches!(g.popups.front(), Some(Popup::Election(_))), "the vote prompt stays");
+        g.popups.clear();
+        g.report(&assets, vec![SimEvent::Election { loc: 3, seat: 6, candidates: vec![c, h], votes: vec![(c, h)], winner: c, kind: 0, rivals: vec![0xFF, 0xFF], privileged: false, religion: 1 }], vec![]);
+        g.report(&assets, vec![SimEvent::Dismissed { person: e, by: vec![c], loc: 3, idx: 6, rival: 0xFF }], vec![]);
+        assert!(g.popups.iter().any(|p| matches!(p, Popup::Election(_))));
+        g.update(&mut ctx, &Input { events: vec![Event::Left(10, 10)], ..Default::default() }, 0);
+        g.update(&mut ctx, &Input::default(), Elect::TIMEOUT_MS);
+        shot(&g, &assets, "election_skip");
+        g.update(&mut ctx, &space, 0);
+        assert!(!g.popups.iter().any(|p| matches!(p, Popup::Election(_) | Popup::Scene { .. })), "both scenes skipped");
     }
 
     #[test]
