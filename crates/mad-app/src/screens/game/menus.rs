@@ -1178,6 +1178,23 @@ impl Game {
                     f.items.splice(0..0, std::iter::repeat_n(b"   ".to_vec(), n));
                     f.acts.splice(0..0, std::iter::repeat_n(Action::Inert, n));
                     self.popups.push_back(f.popup_at(super::REPORT_BOX).with_menu(m));
+                    // the lines before the question wait for a click only once they and the menu overflow the window
+                    // (rules-42 §1 step 3: print never pages for a menu, rules-63 §2.3): a fresh window waits at its
+                    // first overflow, a window continued under an answered menu once the text passes shown + h − 24
+                    // (`scroll_sync`); a shorter window goes straight on to the menu
+                    let [_, _, w, h] = super::REPORT_BOX;
+                    if let Some(k) = self.popups.iter().rposition(|p| matches!(p, super::Popup::Report(l) if *l == self.window)) {
+                        let key = super::Game::report_key(&self.popups[k]);
+                        let limit = match self.continued {
+                            Some((c, n)) if c == key => super::report_window(assets, &self.window[..n.min(self.window.len())]).laid.height + h - 24,
+                            _ => h,
+                        };
+                        if f.layout_height(assets, w) <= limit {
+                            self.popups.remove(k);
+                            self.continued = self.continued.filter(|c| c.0 != key);
+                            self.turn_cash = self.turn_cash.filter(|c| c.0 != key);
+                        }
+                    }
                     return;
                 }
                 if matches!(q, mad_sim::Ask::ContestEntry { .. }) {

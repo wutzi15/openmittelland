@@ -8062,6 +8062,31 @@ pub(crate) mod tests {
         let mut audio = crate::audio::Audio::new(false);
         let mut ctx = ctx_for(&assets, &mut audio);
         // the keys do nothing while the options are off
+        // rules-38 §2.6 step 6: the army text stays, "Euer Heer wird mit Waffen ausgerüstet..." under it
+        g.act(Action::Priv(28, g.priv_city as i32, g.priv_n as i32), &mut ctx);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::PrivArmy(28)), src, acts, .. }) if plain(src).contains("Landsknechte") && plain(src).contains("Euer Heer wird") && acts.iter().all(|a| matches!(a, Action::Inert))));
+        shot(&g, &assets, "priv_army_done");
+    }
+
+    /// rules-42 §1 step 3, rules-63 §2.3: the report lines before a question wait for a click only once they and the
+    /// menu overflow the window; a short window goes straight on to the menu.
+    #[test]
+    fn real_short_window_before_question() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
+        let gift = Ask::Gift { target: 1, prices: [100, 200, 300], names: [0, 1, 2] };
+        for (n, kept) in [(2, false), (30, true)] {
+            g.popups.clear();
+            g.window = (0..n).map(|i| format!("Zeile {i} vor der Frage.")).collect();
+            g.popups.push_back(Popup::Report(g.window.clone()));
+            g.pending = Some(Pending { cmd: None, answers: vec![], ask: gift.clone() });
+            g.open(&assets, Menu::Question);
+            assert_eq!(g.popups.iter().any(|p| matches!(p, Popup::Report(_))), kept, "{n} lines");
+            assert!(matches!(g.popups.back(), Some(Popup::Choice { rect, .. }) if *rect == REPORT_BOX));
+            if !kept {
+                shot(&g, &assets, "short_window_question");
+            }
+        }
         g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'b')), Event::Key(Key::Char(b'p'))], ..Default::default() }, 0);
         assert!(g.popups.is_empty());
         {
