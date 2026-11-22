@@ -443,8 +443,14 @@ mod tests {
         st.heap.recs[i][5] = 5;
         st.persons[h].set_life(1);
         st.persons[h].set_skill(0, 150);
+        if let Some(x) = st.holder(3, 6) {
+            st.office_vacate(x);
+        }
+        st.appoint(h, 3, 6);
+        assert_eq!(st.holder(3, 6), Some(h));
         let mut ev = vec![];
         assert!(!st.life_and_death(h, &mut crate::Auto, &mut ev));
+        assert_eq!(st.holder(3, 6), Some(h), "the heir keeps the office (§7 step 8)");
         assert_eq!(st.persons[h].life(), 30);
         assert_eq!(st.persons[h].gender(), 1);
         assert_eq!(st.persons[h].skill(0), 125);
