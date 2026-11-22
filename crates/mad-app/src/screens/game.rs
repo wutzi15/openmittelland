@@ -5621,7 +5621,10 @@ impl Screen for Game {
     fn draw(&self, frame: &mut Frame, assets: &Assets, mouse: (i32, i32)) -> Option<Cursor> {
         let c = self.draw_screen(frame, assets, mouse);
         if self.room == Some(Room::Handel) && self.branch.is_none() && self.popups.is_empty() && assets.prefs.borrow().sell_all {
-            tips::draw_label(frame, assets, assets.prefs.borrow().tr("Verkaufen (V)", "Sell all (V)"), rooms::SELL_ALL_AT);
+            // gold lettering on the sea, like the game's own hover labels
+            let src = [b"$g$L".as_slice(), &t(assets.prefs.borrow().tr("Verkaufen", "Sell all"))].concat();
+            let (x, y) = rooms::SELL_ALL_AT;
+            text::draw(frame, &assets.font, &text::layout(&assets.font, &src, &[], &[], 640 - x, &[]), x - text::INSET, y - text::INSET);
         }
         if let Some(tip) = self.tooltip(assets, mouse) {
             tips::draw_tip(frame, assets, &tip, mouse);
