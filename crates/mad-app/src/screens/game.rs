@@ -7937,6 +7937,16 @@ pub(crate) mod tests {
         assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::ProdHelp(_)), .. })));
         shot(&g, &assets, "prodhelp");
         g.popups.clear();
+        // playtest: a big order of a good with a long means name; the window grows with the wrapped lines
+        let k = (0..4).find(|&k| g.st.props[b].order(k)[0] == mad_sim::economy::ORDER_PRODUCE).unwrap_or(0);
+        let mut o = g.st.props[b].order(k);
+        (o[0], o[3], o[4], o[5]) = (mad_sim::economy::ORDER_PRODUCE, 13, 36, 4);
+        g.st.props[b].set_order(k, o);
+        g.open(&assets, Menu::ProdHelp(b));
+        let Some(p @ Popup::Choice { rect, .. }) = g.popups.front() else { panic!("the help") };
+        assert!(p.window(&assets, &[]).unwrap().laid.height <= rect[3] - 2 * text::INSET, "the text fits");
+        shot(&g, &assets, "prodhelp_big");
+        g.popups.clear();
         assets.prefs.borrow_mut().production_help = false;
         g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'h'))], ..Default::default() }, 0);
         assert!(g.popups.is_empty());

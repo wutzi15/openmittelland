@@ -605,12 +605,17 @@ impl Game {
                 if let Some(o) = (0..4).map(|k| self.st.props[b].order(k)).find(|o| o[0] == mad_sim::economy::ORDER_PRODUCE) {
                     let (g, w, m_) = (o[3] as usize % GOODS, o[4] as i32, o[5] as i32);
                     let (opt, price) = (mad_sim::economy::means_needed(g, w), self.st.cities[c].price(g) as i32);
-                    let means = self.tables.means_pl.get(g).cloned().unwrap_or_default();
+                    // the means noun as in the order line (rules-36 §1): singular 0xB465C for 1, else the dative plural
+                    let means = |n: i32| if n == 1 { assets.name_table((0xB465C, 15)) } else { self.tables.means_pl.clone() }.get(g).cloned().unwrap_or_default();
                     let out = self.st.production_estimate(b, g, w, m_);
                     let cost = self.st.order_forecast(h, c, g, w, m_);
-                    f.txt(&format!("{}: {} {} {}", self.good(g as u8), tr("bestes Verhältnis Arbeiter:", "best ratio workers:"), means, ratio(g))).raw(b"$N");
-                    f.txt(&format!("{w} {} {opt} {means}", tr("Arbeiter nutzen", "workers use"))).raw(b"$N");
-                    f.txt(&tr("Über 30 Arbeiter (Grenze 30..39, zufällig) zählt der Rest nur halb.", "Above 30 workers (limit 30..39, random) the rest counts half.")).raw(b"$N");
+                    let (rw, rm) = ratio(g).split_once(':').map(|(a, b)| (a.parse().unwrap_or(1), b.parse().unwrap_or(1))).unwrap_or((1, 1));
+                    let worker = |n: i32| if n == 1 { tr("Arbeiter", "worker") } else { tr("Arbeiter", "workers") };
+                    f.txt(&format!("{}: {} {rw} {} {} {rm} {}", self.good(g as u8), tr("am besten", "best"), worker(rw), tr("mit", "with"), means(rm))).raw(b"$N");
+                    f.txt(&format!("{}: {w} {} {} {opt} {}", tr("Euer Auftrag", "Your order"), worker(w), tr("arbeiten am besten mit", "work best with"), means(opt as i32))).raw(b"$N");
+                    if w > 30 {
+                        f.txt(&tr("Über 30 Arbeiter (Grenze 30..39, zufällig) zählt der Rest nur halb.", "Above 30 workers (limit 30..39, random) the rest counts half.")).raw(b"$N");
+                    }
                     f.txt(&format!("{}: {} x {}: {} Taler, {}: {}, {}: {}", tr("Erwartet", "Expected"), dotted(out), price, dotted(out * price), tr("Kosten", "cost"), dotted(cost), tr("Gewinn", "profit"), dotted(out * price - cost))).raw(b"$N");
                 } else {
                     f.txt(&tr("Kein Produktionsauftrag.", "No production order.")).raw(b"$N");
@@ -620,8 +625,14 @@ impl Game {
                     let g = g as usize;
                     f.raw(b"$L$|").txt(self.good(g as u8)).raw(b"$E$|$270]$R").txt(&ratio(g)).raw(b"$E$|$140]$R").txt(&mad_sim::economy::MEANS_COST[g].to_string()).raw(b"$E$|$20]$R").txt(&self.st.cities[c].price(g).to_string()).raw(b"$E$|$N");
                 }
-                let hh = ((self.city_goods(b).len() as i32 + 7) * 24 + 60 + 39) / 40 * 40;
-                self.popups.push_back(f.popup_at([60, 240 - hh.min(440) / 2, 520, hh.min(440)]).with_menu(m));
+                // as high as the laid-out text needs (the wrapped lines vary with the good and the numbers)
+                let mut p = f.popup_at([40, 0, 560, 480]).with_menu(m);
+                let text_h = p.window(assets, &[]).map_or(440, |w| w.laid.height);
+                if let super::Popup::Choice { rect, .. } = &mut p {
+                    let hh = ((text_h + 2 * crate::text::INSET + 39) / 40 * 40).min(480);
+                    *rect = [40, 240 - hh / 2, 560, hh];
+                }
+                self.popups.push_back(p);
                 return;
             }
             Menu::Log(page) => {
