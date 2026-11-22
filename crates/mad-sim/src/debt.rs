@@ -20,38 +20,30 @@ impl State {
         *debt -= x;
     }
 
-    /// §10.1 - §10.3. Returns true when the jury court ran (the death check is then skipped).
-    pub fn debt_check(&mut self, h: usize, ch: &mut dyn Choices, ev: &mut Vec<Event>) -> bool {
-        let nw = self.net_worth(h);
-        let cash = self.persons[h].cash();
-        if !(cash < 0 && cash < -nw / 20) {
-            return false;
-        }
-        let mut debt = -nw / 20 - cash;
-        let (debt0, nw0) = (debt.max(0), nw.max(0));
+    /// Stages 1..4 of §10.2 (goods, transporters, storage, residence): no RNG. Returns the branches visited.
+    fn seize_stages(&mut self, h: usize, debt: &mut i32, ev: &mut Vec<Event>) -> Vec<usize> {
         let branches = |st: &State| st.props_of(h, KIND_BRANCH).collect::<Vec<_>>();
-        let b_count = branches(self).len();
         let mut n = [0u32; 4];
         // stage 1: goods at half price
         for b in branches(self) {
             let c = self.props[b].loc() as usize;
             for g in 0..GOODS {
-                if debt <= 0 {
+                if *debt <= 0 {
                     break;
                 }
                 let price = self.cities[c].price(g) as i32;
-                let q = (debt * 2 / price + 1).min(self.props[b].stock(g) as i32);
+                let q = (*debt * 2 / price + 1).min(self.props[b].stock(g) as i32);
                 let s = self.props[b].stock(g) - q as u16;
                 self.props[b].set_stock(g, s);
                 n[1] += q as u32;
-                self.seize(h, &mut debt, price * q / 2);
+                self.seize(h, debt, price * q / 2);
             }
         }
         // stage 2: transporters at half the purchase price, condition ignored
         for b in branches(self) {
             let c = self.props[b].loc() as usize;
             let mut t = TRANSPORTERS as i32 - 1;
-            while debt > 0 && t >= 0 {
+            while *debt > 0 && t >= 0 {
                 let tu = t as usize;
                 if self.props[b].trans(tu) == 0 {
                     t -= 1;
@@ -61,22 +53,22 @@ impl State {
                 self.props[b].set_trans(tu, k);
                 n[2] += 1;
                 let x = self.cities[c].tprice(tu) as i32 / 2;
-                self.seize(h, &mut debt, x);
+                self.seize(h, debt, x);
             }
         }
         // stage 3: storage, at most 40 % per area
         for b in branches(self) {
             let c = self.props[b].loc() as usize;
             for stone in [false, true] {
-                if debt <= 0 {
+                if *debt <= 0 {
                     break;
                 }
                 let level = if stone { self.cities[c].level_b() } else { self.cities[c].level_a() } as i32;
                 let area = if stone { self.props[b].stone() } else { self.props[b].wood() } as i32;
-                let q = (debt / level.max(1) + 1).min(area * 2 / 5);
+                let q = (*debt / level.max(1) + 1).min(area * 2 / 5);
                 if stone { self.props[b].set_stone((area - q) as u16) } else { self.props[b].set_wood((area - q) as u16) }
                 n[3] += q as u32;
-                self.seize(h, &mut debt, level * q / 2);
+                self.seize(h, debt, level * q / 2);
             }
         }
         // header and the stage 1..3 summaries come before the per-branch lines (rules-23 §3)
@@ -85,7 +77,7 @@ impl State {
         let bs = branches(self);
         if let Some(&f) = bs.first() {
             for b in bs.clone() {
-                if debt <= 0 {
+                if *debt <= 0 {
                     break;
                 }
                 if let Some(i) = self.heap.find(13, ANY, f as u8) {
@@ -96,7 +88,7 @@ impl State {
                     self.props[b].set_residence(old);
                     self.heap.delete(i);
                     self.props[b].set_residence(0xFFFF);
-                    self.seize(h, &mut debt, v as i32);
+                    self.seize(h, debt, v as i32);
                     ev.push(Event::SeizedResidence { city: self.props[b].loc(), word, site: true });
                 } else if self.props[b].has_residence() {
                     if let Some(i) = self.heap.find(14, ANY, f as u8) {
@@ -105,13 +97,41 @@ impl State {
                     let v = self.residence_value_of(b) / 2;
                     let word = self.props[b].residence();
                     self.props[b].set_residence(0xFFFF);
-                    self.seize(h, &mut debt, v as i32);
+                    self.seize(h, debt, v as i32);
                     ev.push(Event::SeizedResidence { city: self.props[b].loc(), word, site: false });
                 }
             }
         }
+        bs
+    }
+
+    /// Ours (warnings): what the turn-end debt check would do now, stages 1..4 run on a copy (they draw no RNG).
+    /// `Some((debt, last))`: a seizure starts; `last` when the stage-5 roll can take the last branch (rules-69 §4).
+    pub fn debt_outlook(&self, h: usize) -> Option<(i32, bool)> {
+        let (nw, cash) = (self.net_worth(h), self.persons[h].cash());
+        if !(cash < 0 && cash < -nw / 20) {
+            return None;
+        }
+        let mut debt = -nw / 20 - cash;
+        let debt0 = debt;
+        let mut copy = self.clone();
+        let bs = copy.seize_stages(h, &mut debt, &mut vec![]);
+        let m = bs.iter().map(|&b| copy.property_value(b).max(0) as i32).min().unwrap_or(0);
+        Some((debt0, bs.len() <= 1 && debt > m / 2))
+    }
+
+    /// §10.1 - §10.3. Returns true when the jury court ran (the death check is then skipped).
+    pub fn debt_check(&mut self, h: usize, ch: &mut dyn Choices, ev: &mut Vec<Event>) -> bool {
+        let nw = self.net_worth(h);
+        let cash = self.persons[h].cash();
+        if !(cash < 0 && cash < -nw / 20) {
+            return false;
+        }
+        let mut debt = -nw / 20 - cash;
+        let (debt0, nw0) = (debt.max(0), nw.max(0));
         // stage 5: whole branch or jury
-        let bs = branches(self);
+        let bs = self.seize_stages(h, &mut debt, ev);
+        let b_count = bs.len();
         let f = bs.first().copied();
         let mut b_left = b_count;
         for (k, &b) in bs.iter().enumerate() {
@@ -198,6 +218,20 @@ mod tests {
         let mut ev = vec![];
         assert!(!st.debt_check(h, &mut crate::Auto, &mut ev));
         assert!(ev.is_empty());
+    }
+
+    /// Ours: the outlook says nothing while solvent, and with one branch and a debt beyond half its value it
+    /// names the last branch; it leaves the state alone.
+    #[test]
+    fn debt_outlook_last_branch() {
+        let mut st = State::new_game(1, 3, &[HumanSetup::test(1)]).unwrap();
+        let h = st.current as usize;
+        assert_eq!(st.debt_outlook(h), None);
+        st.persons[h].set_cash_raw(-1_000_000);
+        let before = st.clone();
+        let (debt, last) = st.debt_outlook(h).unwrap();
+        assert!(debt > 0 && last);
+        assert_eq!(st, before);
     }
 
     /// rules-02 §10.2: a large debt sells the stock first, then ends at the jury or a seized branch.

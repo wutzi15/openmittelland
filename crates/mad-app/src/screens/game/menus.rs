@@ -7,7 +7,7 @@ use crate::{assets::Assets, screens::menu::slot_label};
 use mad_sim::{
     Command,
     heap::ANY,
-    state::{G, KIND_CASTLE, rd16},
+    state::{CITIES, G, GOODS, KIND_CASTLE, rd16},
 };
 
 mod addr {
@@ -445,7 +445,7 @@ impl Game {
                     f.bullet(&t(label), tog.clone()).raw(b"$E$R").item(value, tog).raw(b"$N$|");
                 }
                 // ours: the modern options, and the undo of the last turn end while one is kept (also key `u` in the Kontor)
-                f.raw(b"$C").item(t("Extras..."), Action::Open(Menu::Extras)).raw(b"$N");
+                f.raw(b"$C").item(t("Extras..."), Action::Open(Menu::Extras(0))).raw(b"$N");
                 if self.undo.is_some() {
                     let p = assets.prefs.borrow();
                     f.raw(b"$C").item(t(p.tr("Rückgängig: letzte Runde zurück", "Undo the last turn")), Action::Undo).raw(b"$N");
@@ -453,26 +453,34 @@ impl Game {
                 self.popups.push_back(f.popup_at([100, 60, 440, 360]).with_menu(m));
                 return;
             }
-            Menu::Extras => {
+            Menu::Extras(page) => {
+                // ours: the modern options on two pages, 0 display and comfort, 1 helpers and house rules
                 use super::Pref::*;
                 let p = assets.prefs.borrow().clone();
                 let tr = |de: &'static str, en: &'static str| p.tr(de, en).to_string();
                 let on = |v: bool| if v { tr("Ein", "On") } else { tr("Aus", "Off") };
-                let rows: [(String, String, super::Pref); 13] = [
-                    (tr("Vollbild:", "Fullscreen:"), on(p.fullscreen), Fullscreen),
-                    (tr("Ganzzahlig skalieren:", "Integer scaling:"), on(p.integer_scale), IntegerScale),
-                    (tr("Tempo:", "Speed:"), format!("{}x", p.speed), Speed),
-                    (tr("Autosave alle:", "Autosave every:"), if p.autosave_years == 0 { on(false) } else { format!("{} {}", p.autosave_years, tr("J.", "y.")) }, Autosave),
-                    (tr("Rückgängig:", "Undo:"), on(p.undo), Undo),
-                    (tr("Hinweise:", "Tooltips:"), on(p.tooltips), Tooltips),
-                    (tr("Schuldenwarnung:", "Warnings:"), on(p.warnings), Warnings),
-                    (tr("Sprache:", "Language:"), tr("Deutsch", "English"), Lang),
-                    (tr("Produktionshilfe:", "Production help:"), on(p.production_help), ProductionHelp),
-                    (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
-                    (tr("Bis 255 Arbeiter:", "Up to 255 workers:"), on(p.more_workers), MoreWorkers),
-                    (tr("Alles verkaufen:", "Sell all:"), on(p.sell_all), SellAll),
-                    (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
-                ];
+                let rows: Vec<(String, String, super::Pref)> = if page == 0 {
+                    vec![
+                        (tr("Vollbild:", "Fullscreen:"), on(p.fullscreen), Fullscreen),
+                        (tr("Ganzzahlig skalieren:", "Integer scaling:"), on(p.integer_scale), IntegerScale),
+                        (tr("Tempo:", "Speed:"), format!("{}x", p.speed), Speed),
+                        (tr("Sprache:", "Language:"), tr("Deutsch", "English"), Lang),
+                        (tr("Hinweise:", "Tooltips:"), on(p.tooltips), Tooltips),
+                        (tr("Autosave alle:", "Autosave every:"), if p.autosave_years == 0 { on(false) } else { format!("{} {}", p.autosave_years, tr("J.", "y.")) }, Autosave),
+                        (tr("Rückgängig:", "Undo:"), on(p.undo), Undo),
+                        (tr("Spielnummer wählen:", "Choose game number:"), on(p.seed_choice), SeedChoice),
+                    ]
+                } else {
+                    vec![
+                        (tr("Schuldenwarnung:", "Warnings:"), on(p.warnings), Warnings),
+                        (tr("Produktionshilfe:", "Production help:"), on(p.production_help), ProductionHelp),
+                        (tr("Bilanz (Taste B):", "Ledger (key B):"), on(p.ledger), Ledger),
+                        (tr("Preistabelle (Taste P):", "Price table (key P):"), on(p.price_table), PriceTable),
+                        (tr("Alles verkaufen:", "Sell all:"), on(p.sell_all), SellAll),
+                        (tr("Gnade bei Schulden:", "Debt mercy:"), on(p.debt_mercy), DebtMercy),
+                        (tr("Bis 255 Arbeiter:", "Up to 255 workers:"), on(p.more_workers), MoreWorkers),
+                    ]
+                };
                 f.raw(b"$Z$C^ Extras _$Z");
                 let slot = 1 + 6 * assets.font.advance[b'M' as usize];
                 for (label, value, k) in rows {
@@ -480,10 +488,135 @@ impl Game {
                     let value = [&[crate::text::PAD_MARK, slot][..], &t(&value)].concat();
                     f.bullet(&t(&label), tog.clone()).raw(b"$E$R").item(value, tog).raw(b"$N$|");
                 }
-                if let Some(seed) = self.seed {
+                if page == 0
+                    && let Some(seed) = self.seed
+                {
                     f.raw(b"$C").txt(&format!("{} {seed}", tr("Spielnummer", "Game number"))).raw(b"$N");
                 }
+                // the two windows' openers, each only with its option on
+                if page == 1 && (p.ledger || p.price_table) {
+                    f.raw(b"$C");
+                    if p.ledger {
+                        f.item(t(&tr("Bilanz...", "Ledger...")), Action::Open(Menu::Ledger(0))).raw(b"  ");
+                    }
+                    if p.price_table {
+                        f.item(t(&tr("Preise...", "Prices...")), Action::Open(Menu::Prices));
+                    }
+                    f.raw(b"$N");
+                }
+                let other = if page == 0 { tr("Hilfen und Hausregeln...", "Helpers and house rules...") } else { tr("Anzeige und Komfort...", "Display and comfort...") };
+                f.raw(b"$Z$C").item(t(&other), Action::Open(Menu::Extras(1 - page)));
                 self.popups.push_back(f.popup_at([80, 40, 480, 400]).with_menu(m));
+                return;
+            }
+            Menu::Ledger(page) => {
+                // ours (`prefs.ledger`): page 0 the years' net worth and cash with a bar like the Spielstand's
+                // (rules-28 §3), page 1 the branches' sales minus wages, means and transport per year
+                let pr = assets.prefs.borrow().clone();
+                let tr = |de: &'static str, en: &'static str| pr.tr(de, en).to_string();
+                let years: Vec<&super::LedgerYear> = self.ledger.iter().filter(|y| y.person as usize == h).rev().take(10).collect();
+                f.raw(b"$Z$C^ ").txt(&tr("Bilanz", "Ledger")).raw(b" _$Z");
+                if page == 0 {
+                    let top = years.iter().map(|y| y.worth.max(0) as i64).max().unwrap_or(0);
+                    let scale = [10_000i64, 25_000, 50_000, 100_000, 250_000, 500_000].into_iter().find(|&e| top <= e).unwrap_or(1_000_000);
+                    self.score_bars = years.iter().map(|y| (y.worth.max(0) as i64 * 160 / scale).min(159) as i32).collect();
+                    f.raw(b"$L$6>").txt(&tr("Jahr", "Year")).raw(b"$E$|$300]$R").txt(&tr("Vermögen", "Net worth")).raw(b"$E$|$190]$R").txt(&tr("Kasse", "Cash")).raw(b"$E$|$N");
+                    for y in &years {
+                        f.raw(b"$L$2>").item(b"   ".to_vec(), Action::Nothing).raw(b"$E$6>").txt(&y.year.to_string());
+                        f.raw(b"$E$|$300]$R").txt(&dotted(y.worth)).raw(b"$E$|$190]$R").txt(&dotted(y.cash)).raw(b"$E$|$N");
+                    }
+                } else {
+                    self.score_bars.clear();
+                    // the cities with a result, most recent first, five at most
+                    let mut cities: Vec<u8> = vec![];
+                    for c in years.iter().flat_map(|y| y.branches.iter().map(|b| b.0)) {
+                        if !cities.contains(&c) {
+                            cities.push(c);
+                        }
+                    }
+                    cities.truncate(4);
+                    f.raw(b"$L$6>").txt(&tr("Jahr", "Year"));
+                    for (k, &c) in cities.iter().enumerate() {
+                        let name: String = self.loc(c).chars().take(5).collect();
+                        f.raw(format!("$E$|${}]$R", 370 - 110 * k).as_bytes()).txt(&format!("{name}."));
+                    }
+                    f.raw(b"$E$|$N");
+                    for y in &years {
+                        f.raw(b"$L$6>").txt(&y.year.to_string());
+                        for (k, &c) in cities.iter().enumerate() {
+                            let v = y.branches.iter().filter(|b| b.0 == c).map(|b| b.1 - b.2).sum::<i32>();
+                            f.raw(format!("$E$|${}]$R", 370 - 110 * k).as_bytes()).txt(&if y.branches.iter().any(|b| b.0 == c) { dotted(v) } else { "-".to_string() });
+                        }
+                        f.raw(b"$E$|$N");
+                    }
+                }
+                if years.is_empty() {
+                    f.raw(b"$C").txt(&tr("Noch kein Jahr abgeschlossen.", "No year finished yet.")).raw(b"$N");
+                }
+                f.raw(b"$Z$C").item(t(&if page == 0 { tr("Niederlassungen", "Branches") } else { tr("Vermögen", "Net worth") }), Action::Open(Menu::Ledger(1 - page)));
+                let hh = ((years.len() as i32 + 4) * 24 + 60 + 39) / 40 * 40;
+                self.popups.push_back(f.popup_at([40, 240 - hh / 2, 560, hh]).with_menu(m));
+                return;
+            }
+            Menu::ProdHelp(b) => {
+                // ours (`prefs.production_help`): the first production order's best worker:means ratio, the means its
+                // workers use, the half output above the 30..39 cap, and the expected yield at the local price
+                // (rules-02 §3.3 without the dice: `production_estimate`); then every good of the city
+                let pr = assets.prefs.borrow().clone();
+                let tr = |de: &'static str, en: &'static str| pr.tr(de, en).to_string();
+                let c = self.st.props[b].loc() as usize;
+                let ratio = |g: usize| {
+                    let (r, k) = (mad_sim::economy::MEANS_DIV[g], 10);
+                    let d = (1..=k).rev().find(|d| r % d == 0 && k % d == 0).unwrap_or(1);
+                    format!("{}:{}", r / d, k / d)
+                };
+                f.raw(b"$Z$C^ ").txt(&tr("Produktionshilfe", "Production help")).raw(b" _$Z$L");
+                if let Some(o) = (0..4).map(|k| self.st.props[b].order(k)).find(|o| o[0] == mad_sim::economy::ORDER_PRODUCE) {
+                    let (g, w, m_) = (o[3] as usize % GOODS, o[4] as i32, o[5] as i32);
+                    let (opt, price) = (mad_sim::economy::means_needed(g, w), self.st.cities[c].price(g) as i32);
+                    let means = self.tables.means_pl.get(g).cloned().unwrap_or_default();
+                    let out = self.st.production_estimate(b, g, w, m_);
+                    let cost = self.st.order_forecast(h, c, g, w, m_);
+                    f.txt(&format!("{}: {} {} {}", self.good(g as u8), tr("bestes Verhältnis Arbeiter:", "best ratio workers:"), means, ratio(g))).raw(b"$N");
+                    f.txt(&format!("{w} {} {opt} {means}", tr("Arbeiter nutzen", "workers use"))).raw(b"$N");
+                    f.txt(&tr("Über 30 Arbeiter (Grenze 30..39, zufällig) zählt der Rest nur halb.", "Above 30 workers (limit 30..39, random) the rest counts half.")).raw(b"$N");
+                    f.txt(&format!("{}: {} x {}: {} Taler, {}: {}, {}: {}", tr("Erwartet", "Expected"), dotted(out), price, dotted(out * price), tr("Kosten", "cost"), dotted(cost), tr("Gewinn", "profit"), dotted(out * price - cost))).raw(b"$N");
+                } else {
+                    f.txt(&tr("Kein Produktionsauftrag.", "No production order.")).raw(b"$N");
+                }
+                f.raw(b"$Z$L").txt(&tr("Ware", "Good")).raw(b"$E$|$270]$R").txt(&tr("Verhältnis", "Ratio")).raw(b"$E$|$140]$R").txt(&tr("Mittelpreis", "Means cost")).raw(b"$E$|$20]$R").txt(&tr("Ortspreis", "Local price")).raw(b"$E$|$N");
+                for g in self.city_goods(b) {
+                    let g = g as usize;
+                    f.raw(b"$L$|").txt(self.good(g as u8)).raw(b"$E$|$270]$R").txt(&ratio(g)).raw(b"$E$|$140]$R").txt(&mad_sim::economy::MEANS_COST[g].to_string()).raw(b"$E$|$20]$R").txt(&self.st.cities[c].price(g).to_string()).raw(b"$E$|$N");
+                }
+                let hh = ((self.city_goods(b).len() as i32 + 7) * 24 + 60 + 39) / 40 * 40;
+                self.popups.push_back(f.popup_at([60, 240 - hh.min(440) / 2, 520, hh.min(440)]).with_menu(m));
+                return;
+            }
+            Menu::Prices => {
+                // ours (`prefs.price_table`): every good in every city; the best price of a good in gold
+                let pr = assets.prefs.borrow().clone();
+                f.raw(b"$Z$C^ ").txt(pr.tr("Preise", "Prices")).raw(b" _$Z$L");
+                let col = |k: usize| format!("$E$|${}]$R", 470 - 50 * k);
+                for c in 0..CITIES {
+                    f.raw(col(c).as_bytes()).txt(&self.loc(c as u8).chars().take(3).collect::<String>());
+                }
+                f.raw(b"$E$|$N");
+                for g in 0..GOODS {
+                    let best = (0..CITIES).map(|c| self.st.cities[c].price(g)).max().unwrap_or(0);
+                    f.raw(b"$L$|").txt(self.good(g as u8));
+                    for (c, city) in self.st.cities.iter().enumerate() {
+                        let p = city.price(g);
+                        f.raw(col(c).as_bytes());
+                        if p == best {
+                            f.raw(b"$g").txt(&p.to_string()).raw(b"$t");
+                        } else {
+                            f.txt(&p.to_string());
+                        }
+                    }
+                    f.raw(b"$E$|$N");
+                }
+                self.popups.push_back(f.popup_at([10, 10, 620, 460]).with_menu(m));
                 return;
             }
             Menu::Music => {

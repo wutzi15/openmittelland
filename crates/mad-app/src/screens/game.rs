@@ -496,8 +496,14 @@ enum Menu {
     Laws(u8),
     /// Spieloptionen sub-pages (rules-00 option flags, EXE 0xBE845..).
     Options,
-    /// Modern options (ours, `prefs.rs`), opened from the bottom of the Optionen window.
-    Extras,
+    /// Modern options (ours, `prefs.rs`) by page, opened from the bottom of the Optionen window.
+    Extras(u8),
+    /// Ours: the ledger (page 0 net worth and cash by year, 1 branch results) and the price table (`prefs.ledger`,
+    /// `prefs.price_table`).
+    Ledger(u8),
+    Prices,
+    /// Ours (`prefs.production_help`): the production help of branch `b` (key H on the branch screen).
+    ProdHelp(usize),
     /// The player's privileges (rules-04b §4.1).
     Privileges,
     Music,
@@ -622,6 +628,8 @@ enum Pref {
     MoreWorkers,
     SeedChoice,
     SellAll,
+    Ledger,
+    PriceTable,
 }
 
 #[derive(Clone, Debug)]
@@ -1042,6 +1050,10 @@ pub struct Game {
     /// The transporter window's picture (rules-34 §4).
     trans_pic: (Menu, u16),
     score_bars: Vec<i32>,
+    /// Ours (`prefs.ledger`): one entry per finished year of a human, in order; empty after a load.
+    ledger: Vec<LedgerYear>,
+    /// `BranchCosts` of the running turn end, folded into the ledger at the next turn start.
+    branch_costs: Vec<(u8, i32)>,
     /// Fanfare drawn for the last title charter (rules-27 §1).
     award_song: u8,
     /// The herald's fanfare (rules-12 §3.6), playing while the year-end pages are shown.
@@ -1129,6 +1141,16 @@ pub struct Game {
     save_edit: Option<u8>,
     pending: Option<Pending>,
     amount: u32,
+}
+
+/// Ours: a human's year in the ledger. `branches`: (city, sales revenue, wages + means + transport) per branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LedgerYear {
+    person: u8,
+    year: u16,
+    worth: i32,
+    cash: i32,
+    branches: Vec<(u8, i32, i32)>,
 }
 
 struct Tables {
@@ -1276,6 +1298,8 @@ impl Game {
             form_icons: vec![],
             trans_pic: (Menu::Quit, 0),
             score_bars: vec![],
+            ledger: vec![],
+            branch_costs: vec![],
             award_song: 7,
             herald_song: None,
             priv_holder: 0xFF,
@@ -2184,8 +2208,16 @@ impl Game {
                 self.popups.push_back(Popup::Chronicle(assets.text(0xC2024)));
             }
         }
+        for e in &ev {
+            if let SimEvent::BranchCosts { branch, wages, means, transport } = *e {
+                self.branch_costs.push((branch, wages + means + transport));
+            }
+        }
         let Some(SimEvent::TurnStart { person, year }) = after.first() else { return };
         self.entered = false;
+        if *year > 1600 && self.st.persons[*person as usize].human() {
+            self.ledger_record(*person, *year - 1, after);
+        }
         if self.cfg_announce {
             let src = assets.text(addr::NEXT_PLAYER);
             let src = subst(&src, b"%1N1", &t(&self.person_name(*person)));
@@ -2212,6 +2244,64 @@ impl Game {
             self.popups.push_back(Popup::Report(rest));
         }
         self.popups.extend(cert);
+        if assets.prefs.borrow().warnings && self.st.persons[*person as usize].human() {
+            self.popups.extend(self.warnings(assets, *person as usize));
+        }
+    }
+
+    /// Ours: the finished year `year` of `person` from the turn-start sales and the turn-end costs collected.
+    fn ledger_record(&mut self, person: u8, year: u16, after: &[SimEvent]) {
+        let mut branches: Vec<(u8, i32, i32)> = vec![];
+        let mut add = |b: u8, rev: i32, cost: i32| match branches.iter_mut().find(|r| r.0 == b) {
+            Some(r) => (r.1, r.2) = (r.1 + rev, r.2 + cost),
+            None => branches.push((b, rev, cost)),
+        };
+        for &(b, cost) in &self.branch_costs {
+            add(b, 0, cost);
+        }
+        for e in after {
+            if let SimEvent::Sold { branch, revenue, .. } = *e {
+                add(branch, revenue, 0);
+            }
+        }
+        self.branch_costs.clear();
+        let branches = branches.into_iter().map(|(b, r, c)| (self.st.props[b as usize].loc(), r, c)).collect();
+        let p = person as usize;
+        self.ledger.push(LedgerYear { person, year, worth: self.st.net_worth(p), cash: self.st.persons[p].cash(), branches });
+    }
+
+    /// Ours (`prefs.warnings`): the turn-start warnings of human `h` as one window, none when nothing is due.
+    /// No RNG: the debt outlook runs on a copy, the order costs are the order book's forecast.
+    fn warnings(&self, assets: &Assets, h: usize) -> Option<Popup> {
+        let pr = assets.prefs.borrow();
+        let mut lines: Vec<String> = vec![];
+        if let Some((debt, last)) = self.st.debt_outlook(h) {
+            lines.push(pr.tr(&format!("Am Jahresende droht eine Pfändung: die Kasse liegt {} Taler unter dem erlaubten Minus.", dotted(debt)), &format!("A seizure threatens at the year's end: the cash is {} Taler below the allowed overdraft.", dotted(debt))).to_string());
+            if last {
+                lines.push(pr.tr("Dabei kann Eure letzte Niederlassung verloren gehen!", "Your last branch may be taken!").to_string());
+            }
+        }
+        for i in self.st.heap.all(56, h as u8, mad_sim::heap::ANY) {
+            let r = &self.st.heap.recs[i];
+            if r[3] <= 1 {
+                let (who, amount, year) = (self.pref(r[4], 1, 3), dotted(mad_sim::heap::r32(r, 5)), self.st.year + r[3] as u16);
+                lines.push(pr.tr(&format!("Der Kredit über {amount} Taler bei {who} wird {year} fällig."), &format!("The loan of {amount} Taler from {who} falls due in {year}.")).to_string());
+            }
+        }
+        let cost: i32 = self.st.props_of(h, mad_sim::state::KIND_BRANCH).map(|b| self.order_cost(b)).sum();
+        let cash = self.st.persons[h].cash();
+        if cost > cash {
+            lines.push(pr.tr(&format!("Die bestätigten Aufträge kosten {} Taler, in der Kasse sind {}.", dotted(cost), dotted(cash)), &format!("The confirmed orders cost {} Taler, the cash is {}.", dotted(cost), dotted(cash))).to_string());
+        }
+        if lines.is_empty() {
+            return None;
+        }
+        let mut f = Form::new(b"$C^ ");
+        f.txt(pr.tr("Warnung", "Warning")).raw(b" _$Z$L");
+        for l in lines {
+            f.txt(&l).raw(b"$N$Z");
+        }
+        Some(f.popup(assets, 100, 440, None))
     }
 
     /// The election screen's content (rules-15 §3.4, texts rules-12 §3.7 steps 1..5) from the finished election.
@@ -2906,7 +2996,7 @@ impl Game {
             Harvest { .. } | SkillGain { .. } | TreePrices(_) | Battle { .. } => return None,
             StorageOffer { .. } => return None, // the offers are shown in the storage menu, not as news
             // rules-23 §1: production, exports and give-aways are the "Erträge" window; arrivals print nothing
-            Produced { .. } | Sold { .. } | Arrived { .. } | GivenAway { .. } => return None,
+            Produced { .. } | Sold { .. } | BranchCosts { .. } | Arrived { .. } | GivenAway { .. } => return None,
             Bill { .. } => return None, // shown as the bill page
             // EXE 0xC08EC; the income belongs to the player whose turn starts
             OfficeIncome { amount } => plain(&subst(&subst(&assets.text(0xC08EC), b"%1N4", &t(&self.rank(self.me()?))), b"%d", &t(&dotted(amount)))),
@@ -4424,6 +4514,8 @@ impl Game {
                             Pref::MoreWorkers => p.more_workers ^= true,
                             Pref::SeedChoice => p.seed_choice ^= true,
                             Pref::SellAll => p.sell_all ^= true,
+                            Pref::Ledger => p.ledger ^= true,
+                            Pref::PriceTable => p.price_table ^= true,
                         }
                         self.st.house = p.house();
                         if let Err(e) = p.save(&ctx.assets.user_saves) {
@@ -4631,6 +4723,17 @@ impl Game {
                 None => drop(self.act(Action::EndTurn, ctx)),
             },
             (Event::Left(x, y), None) => self.click_kontor(ctx.assets, (x, y)),
+            // ours: the production help of the branch screen (key H) and the Kontor keys of the ledger and the
+            // price table, each behind its option
+            (Event::Key(Key::Char(c)), Some(b)) if c.eq_ignore_ascii_case(&b'h') && ctx.assets.prefs.borrow().production_help => self.open(ctx.assets, Menu::ProdHelp(b)),
+            (Event::Key(Key::Char(c)), None) if self.room.is_none() && self.me().is_some() => {
+                let (ledger, prices) = { let p = ctx.assets.prefs.borrow(); (p.ledger, p.price_table) };
+                match c.to_ascii_lowercase() {
+                    b'b' if ledger => self.open(ctx.assets, Menu::Ledger(0)),
+                    b'p' if prices => self.open(ctx.assets, Menu::Prices),
+                    _ => {}
+                }
+            }
             _ => {}
         }
         Next::Stay
@@ -5731,13 +5834,15 @@ impl Game {
                     frame.blit(&assets.icon(id)[0], it.x, it.y - ICON_DY);
                 }
             }
-            if let Popup::Choice { menu: Some(Menu::Spielstand), .. } = p {
+            if let Popup::Choice { menu: Some(Menu::Spielstand | Menu::Ledger(0)), .. } = p {
                 // rules-28 §3: solid black bars from x 256, 15 px high, 3 px below the row's line top
+                // (ours: the ledger's net worth bars likewise, from x 420)
+                let x0 = if matches!(p, Popup::Choice { menu: Some(Menu::Spielstand), .. }) { 256 } else { 420 };
                 let w2 = p.window(assets, &[]).unwrap();
                 for (k, &bw) in self.score_bars.iter().enumerate() {
                     let it = w2.item_rect(k);
                     if bw > 0 {
-                        frame.fill_rgb([256, it.y + 3, bw, 15], [0, 0, 0]);
+                        frame.fill_rgb([x0, it.y + 3, bw, 15], [0, 0, 0]);
                     }
                     frame.blit(&assets.icon(0x73)[0], it.x, it.y);
                 }
@@ -7259,6 +7364,71 @@ pub(crate) mod tests {
         shot(&g, &assets, "ertraege_ab");
     }
 
+    /// Ours: the ledger pages, the price table, the warnings and the production help (all behind their options),
+    /// the ledger's recording from the sim events, and the Kontor keys only with the option on.
+    #[test]
+    fn real_extras_windows() {
+        let Some(assets) = test_assets() else { return };
+        let mut g = Game::start(&assets, State::new_game(3, 3, &[mad_sim::world::HumanSetup::test(3)]).unwrap());
+        g.popups.clear();
+        let h = g.me().unwrap();
+        let b = g.st.branch_at(h, 3).unwrap();
+        let loc = g.st.props[b].loc();
+        let mut audio = crate::audio::Audio::new(false);
+        let mut ctx = ctx_for(&assets, &mut audio);
+        // the keys do nothing while the options are off
+        g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'b')), Event::Key(Key::Char(b'p'))], ..Default::default() }, 0);
+        assert!(g.popups.is_empty());
+        {
+            let mut p = assets.prefs.borrow_mut();
+            (p.ledger, p.price_table, p.warnings, p.production_help) = (true, true, true, true);
+        }
+        // a turn end's costs and the next turn start's sales make the year's line
+        let sold = SimEvent::Sold { branch: b as u8, good: 0, city: 0, qty: 10, revenue: 300 };
+        g.report(&assets, vec![SimEvent::BranchCosts { branch: b as u8, wages: 100, means: 50, transport: 0 }], vec![]);
+        g.report(&assets, vec![SimEvent::TurnStart { person: h as u8, year: 1601 }, sold], vec![]);
+        assert_eq!(g.ledger.last().map(|y| (y.year, y.branches.clone())), Some((1600, vec![(loc, 300, 150)])));
+        g.popups.clear();
+        for (year, worth, cash) in [(1601, 12_500, 900), (1602, 9_800, -400), (1603, 21_000, 3_100)] {
+            g.ledger.push(LedgerYear { person: h as u8, year, worth, cash, branches: vec![(loc, worth / 10, worth / 20), (0, 500, 900)] });
+        }
+        g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'b'))], ..Default::default() }, 0);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Ledger(0)), .. })));
+        shot(&g, &assets, "ledger0");
+        g.popups.clear();
+        g.open(&assets, Menu::Ledger(1));
+        shot(&g, &assets, "ledger1");
+        g.popups.clear();
+        g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'p'))], ..Default::default() }, 0);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::Prices), .. })));
+        shot(&g, &assets, "prices");
+        g.popups.clear();
+        // warnings: nothing while solvent (the uncle's 802 Taler order exceeds the 750 start cash: a warning);
+        // then a loan due this year, orders over the cash and a seizure ahead
+        assert!(g.warnings(&assets, h).is_some());
+        g.st.persons[h].set_cash_raw(5000);
+        assert!(g.warnings(&assets, h).is_none());
+        let i = g.st.heap.alloc(56, h as u8, mad_sim::state::NONE, 1).unwrap();
+        g.st.heap.recs[i][4] = 20;
+        mad_sim::heap::w32(&mut g.st.heap.recs[i], 5, 4000);
+        g.st.persons[h].set_cash_raw(-3000);
+        let w = g.warnings(&assets, h).expect("warnings");
+        g.popups.push_back(w);
+        shot(&g, &assets, "warnings");
+        g.popups.clear();
+        // production help on the branch screen
+        g.st.persons[h].set_cash_raw(750);
+        g.branch = Some(b);
+        shot(&g, &assets, "branch_help");
+        g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'h'))], ..Default::default() }, 0);
+        assert!(matches!(g.popups.front(), Some(Popup::Choice { menu: Some(Menu::ProdHelp(_)), .. })));
+        shot(&g, &assets, "prodhelp");
+        g.popups.clear();
+        assets.prefs.borrow_mut().production_help = false;
+        g.update(&mut ctx, &Input { events: vec![Event::Key(Key::Char(b'h'))], ..Default::default() }, 0);
+        assert!(g.popups.is_empty());
+    }
+
     /// Ours: the Extras window (modern options) and one toggle written to prefs.txt.
     #[test]
     fn real_extras_window() {
@@ -7266,8 +7436,11 @@ pub(crate) mod tests {
         let mut g = Game::start(&assets, State::new_game(9, 3, &[mad_sim::world::HumanSetup::test(4)]).unwrap());
         g.popups.clear();
         g.seed = Some(1234);
-        g.open(&assets, Menu::Extras);
+        g.open(&assets, Menu::Extras(0));
         shot(&g, &assets, "extras");
+        g.popups.clear();
+        g.open(&assets, Menu::Extras(1));
+        shot(&g, &assets, "extras1");
         assert!(g.st.house == mad_sim::state::House::default());
     }
 

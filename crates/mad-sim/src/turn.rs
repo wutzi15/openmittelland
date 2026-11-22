@@ -443,7 +443,7 @@ impl State {
                     let sold = self.cities[dest].sold(g) + qty as u32;
                     self.cities[dest].set_sold(g, sold);
                     self.add_transporters(src, t, cnt, cond);
-                    ev.push(Event::Sold { good: g as u8, city: dest as u8, qty, revenue: rev });
+                    ev.push(Event::Sold { branch: src as u8, good: g as u8, city: dest as u8, qty, revenue: rev });
                 }
                 4 | 5 => match self.branch_at(h, dest) {
                     Some(d) => {
@@ -865,6 +865,7 @@ impl State {
         let _ = inf;
         for b in self.props_of(h, KIND_BRANCH).collect::<Vec<_>>() {
             let c = self.props[b].loc() as usize;
+            let before = (wages, means, transport);
             for k in 0..4 {
                 let mut o = self.props[b].order(k);
                 if o[7] != ST_CONFIRMED {
@@ -926,6 +927,9 @@ impl State {
                     o[7] = if o[0] >= 6 { ST_POSSIBLE } else { ST_DONE };
                 }
                 self.props[b].set_order(k, o);
+            }
+            if (wages, means, transport) != before {
+                ev.push(Event::BranchCosts { branch: b as u8, wages: wages - before.0, means: means - before.1, transport: transport - before.2 });
             }
         }
         self.troop_execute(h);

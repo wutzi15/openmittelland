@@ -210,6 +210,11 @@ pub const ST_POSSIBLE: u8 = 1;
 pub const ST_CONFIRMED: u8 = 2;
 pub const ST_DONE: u8 = 3;
 
+/// Means `w` workers of good `g` use fully: `w * 10 / R[g]`, at least 1 (§3.3).
+pub fn means_needed(g: usize, w: i32) -> i32 {
+    (w * 10 / MEANS_DIV[g]).max(1)
+}
+
 pub fn production_order(g: u8, w: u8, m: u8, status: u8) -> [u8; 8] {
     [ORDER_PRODUCE, 0, 0, g, w, m, 0, status]
 }
@@ -268,7 +273,7 @@ impl State {
         let skill = self.effective_skill(branch, g);
         let pay = self.persons[self.props[branch].owner() as usize].pay_workers() as i32;
         let mut out = output_terms(skill, year_f, w, g, pay, city_f, self.weather[g] as i32);
-        let opt = (w * 10 / MEANS_DIV[g]).max(1);
+        let opt = means_needed(g, w);
         if m < opt {
             out = m * out / opt;
         }
@@ -278,6 +283,29 @@ impl State {
         let t = 30 + self.ri(10);
         if w > t {
             out = out * t / w + out * (w - t) / (2 * w);
+        }
+        out
+    }
+
+    /// Ours (production help): the output of `production_output` without its RNG draws, with the mean weather
+    /// (100: the weather factor is 1) and the worker cap T averaged over its range 30..39.
+    pub fn production_estimate(&self, branch: usize, g: usize, w: i32, m: i32) -> i32 {
+        let c = self.props[branch].loc() as usize;
+        let y = self.year as i32;
+        let year_f = if y < 1620 { 155 - (y - 1600) } else { 135 };
+        let city_f = self.cities[c].yield_(g) as i32 + 200 + self.county_bonus(c) - 60 * self.city_blocked(c) as i32;
+        let skill = self.effective_skill(branch, g);
+        let pay = self.persons[self.props[branch].owner() as usize].pay_workers() as i32;
+        let mut out = output_terms(skill, year_f, w, g, pay, city_f, 100);
+        let opt = means_needed(g, w);
+        if m < opt {
+            out = m * out / opt;
+        }
+        if m > opt {
+            out += MEANS_COST[g] * (m - opt) / (2 * self.cities[c].price(g) as i32);
+        }
+        if w > 30 {
+            out = (30..40).map(|t| if w > t { out * t / w + out * (w - t) / (2 * w) } else { out }).sum::<i32>() / 10;
         }
         out
     }
@@ -611,6 +639,25 @@ mod tests {
             let (w, m) = ratio[g];
             assert_eq!(w * 10 * 10 / MEANS_DIV[g], m * 10, "{}", GOOD_NAMES[g]);
         }
+    }
+
+    /// Ours: the production estimate is `production_output` at weather 100 for w ≤ 30, draws nothing, and the
+    /// means are what §3.3 calls optimal (w · 10 / R).
+    #[test]
+    fn production_estimate_matches_output_without_rng() {
+        let mut st = State::new_game(3, 3, &[crate::world::HumanSetup::test(3)]).unwrap();
+        let h = st.current as usize;
+        let b = st.branch_at(h, 3).unwrap();
+        st.weather = [100; GOODS];
+        let g = (0..GOODS).find(|&g| st.cities[3].yield_(g) > 100).unwrap();
+        let rng = st.rng;
+        let est = st.production_estimate(b, g, 20, means_needed(g, 20));
+        assert_eq!(st.rng, rng);
+        assert_eq!(est, st.production_output(b, g, 20, means_needed(g, 20)));
+        // above the cap the surplus workers count half: 40 workers yield less than twice 20
+        let est40 = st.production_estimate(b, g, 40, means_needed(g, 40));
+        assert!(est40 > est && est40 < 2 * est, "{est} {est40}");
+        assert_eq!((means_needed(0, 10), means_needed(3, 4), means_needed(14, 1)), (2, 8, 1));
     }
 
     /// rules-02 §2.2 inflation: 1600 → 1204.

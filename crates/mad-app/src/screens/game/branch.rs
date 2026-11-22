@@ -35,7 +35,7 @@ fn control_rect(i: usize) -> [i32; 4] {
 }
 
 /// Abbreviations of the order book (handbook appendix III, H p.37).
-fn abbrev(name: &str) -> &str {
+pub(super) fn abbrev(name: &str) -> &str {
     const ABBR: [(&str, &str); 11] = [
         ("F\u{fc}rstenbr\u{fc}ck", "F\u{fc}rstenbr."),
         ("Finsterwalde", "Finsterw."),
@@ -295,7 +295,7 @@ impl Game {
 
     /// Cost of the confirmed or possible orders as the panel prints it: wages and means of a
     /// production order, trips of a transport order (rules-02 §3, §4).
-    fn order_cost(&self, b: usize) -> i32 {
+    pub(super) fn order_cost(&self, b: usize) -> i32 {
         let pr = &self.st.props[b];
         let (h, c) = (pr.owner() as usize, pr.loc() as usize);
         (0..ROWS)
@@ -324,7 +324,8 @@ impl Game {
         ((0..GOODS).map(|g| pr.stock(g) as u32).sum::<u32>() * 100 / cap) as i32
     }
 
-    fn branch_form(&self, b: usize) -> Form {
+    /// `help`: ours, the production help's opener between the two bottom numbers (`prefs.production_help`).
+    fn branch_form(&self, b: usize, help: bool) -> Form {
         let mut f = Form::new(b"$C");
         for k in 0..ROWS {
             if !matches!(self.st.props[b].order(k as usize)[0], 0 | 1) {
@@ -333,12 +334,16 @@ impl Game {
             self.order_line(&mut f, b, k);
             f.raw(b"$N");
         }
-        f.raw(b"$Z$L").txt(&format!("Auslastung: {}%", self.utilisation(b))).raw(b"$E$R").txt(&format!("Kosten: {} Taler", self.order_cost(b))).raw(b"$N");
+        f.raw(b"$Z$L").txt(&format!("Auslastung: {}%", self.utilisation(b)));
+        if help {
+            f.raw(b"$E$C").item(t("Hilfe (H)"), Action::Open(Menu::ProdHelp(b)));
+        }
+        f.raw(b"$E$R").txt(&format!("Kosten: {} Taler", self.order_cost(b))).raw(b"$N");
         f
     }
 
     pub(super) fn branch_window(&self, assets: &Assets, b: usize, lit: &[usize]) -> (Window, Vec<super::Action>) {
-        let f = self.branch_form(b);
+        let f = self.branch_form(b, assets.prefs.borrow().production_help);
         let refs: Vec<&[u8]> = f.items.iter().map(Vec::as_slice).collect();
         (Window::new(assets, RECT, &f.src, &refs, &[], lit).with_text_dy(6), f.acts)
     }
@@ -405,7 +410,7 @@ impl Game {
         let w = self.branch_window(assets, b, &hover).0;
         w.draw(frame, assets);
         // the escort icons (`%J` 0x1B6) of kinds 3 and 5, at their reserved items
-        for (k, _) in self.branch_form(b).items.iter().enumerate().filter(|(_, it)| it.as_slice() == ESCORT_ITEM) {
+        for (k, _) in self.branch_form(b, assets.prefs.borrow().production_help).items.iter().enumerate().filter(|(_, it)| it.as_slice() == ESCORT_ITEM) {
             let r = w.item_rect(k);
             frame.blit(&assets.icon(ESCORT_ICON)[0], r.x, r.y + ESCORT_DY);
         }

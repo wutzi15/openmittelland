@@ -38,6 +38,10 @@ pub struct Prefs {
     pub seed_choice: bool,
     /// "Alles verkaufen" at the Kontor: one action sells every branch's stock locally.
     pub sell_all: bool,
+    /// "Bilanz" window: net worth, cash and branch results of the past years (Kontor key B).
+    pub ledger: bool,
+    /// "Preise" table: every good in every city (Kontor key P).
+    pub price_table: bool,
 }
 
 impl Default for Prefs {
@@ -57,6 +61,8 @@ impl Default for Prefs {
             more_workers: false,
             seed_choice: false,
             sell_all: false,
+            ledger: false,
+            price_table: false,
         }
     }
 }
@@ -83,6 +89,8 @@ impl Prefs {
                 "more_workers" => p.more_workers = b,
                 "seed_choice" => p.seed_choice = b,
                 "sell_all" => p.sell_all = b,
+                "ledger" => p.ledger = b,
+                "price_table" => p.price_table = b,
                 _ => {}
             }
         }
@@ -92,7 +100,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -107,6 +115,8 @@ impl Prefs {
             b(self.more_workers),
             b(self.seed_choice),
             b(self.sell_all),
+            b(self.ledger),
+            b(self.price_table),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -130,7 +140,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, debt_mercy: true, seed_choice: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, debt_mercy: true, seed_choice: true, ledger: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();

@@ -84,7 +84,10 @@ pub enum Event {
     Harvest { good: u8, quality: u8 },
     Produced { branch: u8, good: u8, amount: u32 },
     SkillGain { good: u8, skill: u8 },
-    Sold { good: u8, city: u8, qty: u16, revenue: i32 },
+    /// `branch`: the shipment's source branch.
+    Sold { branch: u8, good: u8, city: u8, qty: u16, revenue: i32 },
+    /// Ours (ledger): one branch's share of the bill's wages, means and transport rows.
+    BranchCosts { branch: u8, wages: i32, means: i32, transport: i32 },
     Arrived { branch: u8, good: u8, qty: u16 },
     Returned { branch: u8 },
     GivenAway { branch: u8, amount: u32 },
