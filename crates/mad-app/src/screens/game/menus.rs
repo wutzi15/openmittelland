@@ -1165,6 +1165,11 @@ impl Game {
                     self.popups.push_back(f.popup_at(super::REPORT_BOX).with_menu(m));
                     return;
                 }
+                if matches!(q, mad_sim::Ask::ContestEntry { .. }) {
+                    // rules-13 §3.1: printed into the year-end "Ereignisse" window, scrolled to its last line
+                    self.popups.push_back(f.popup_at(super::YEAR_BOX).with_menu(m));
+                    return;
+                }
                 if matches!(q, mad_sim::Ask::OccupyCastle { .. }) {
                     self.popups.push_back(f.popup_at(super::battle::REPORT_RECT).with_menu(m));
                     return;

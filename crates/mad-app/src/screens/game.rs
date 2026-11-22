@@ -1003,7 +1003,7 @@ impl Popup {
                 let w = Window::new(assets, *rect, src, &refs, &[], lit).with_text_dy(if *gems { GEM_DY } else { 0 });
                 // a menu printed into the turn-end report window keeps its scroll frame and is scrolled up until its
                 // last line ends at the window bottom, to the pixel (rules-63 §2.3; live A/B 2026-11-22: 94 px)
-                if *rect == REPORT_BOX {
+                if *rect == REPORT_BOX || *rect == YEAR_BOX {
                     let over = (w.laid.height - rect[3]).max(0);
                     w.with_scroll().with_text_dy(GEM_DY - over)
                 } else {
@@ -1219,7 +1219,7 @@ const FATE_IDS: &[(u8, u32)] = &[
 ];
 
 const REPORT_BOX: [i32; 4] = [30, 110, 520, 290];
-const YEAR_BOX: [i32; 4] = [100, 126, 440, 300];
+pub(super) const YEAR_BOX: [i32; 4] = [100, 126, 440, 300];
 
 /// Leads a report line that is markup kept from a menu answered in the window (the gifts, rules-63 §2), one char
 /// per byte; its `%m` items are the gem bullets. The char after it is the chosen bullet ('0'..) or '-'.
@@ -5719,6 +5719,19 @@ impl Screen for Game {
                     }
                     continue;
                 }
+                // ours (`prefs.skip_trial`): a click on a candidate line before the human's open prompt runs up to it
+                // and votes at once (the original ends the candidate list or a vote with that click)
+                if let Some(Popup::Election(el)) = self.popups.front()
+                    && ctx.assets.prefs.borrow().skip_trial
+                    && self.live_vote(el)
+                    && let Some(k) = el.line_at(pos)
+                {
+                    // on the prompt, so the finished election goes on after it (`continue_with`)
+                    if let Some(Popup::Election(el)) = self.popups.front_mut() {
+                        el.pos = el.steps.len() - 1;
+                    }
+                    return self.act(Action::Answer(k as u32), ctx);
+                }
                 let win = self.popups.front().and_then(|p| p.window(ctx.assets, &[]));
                 let scrolled = matches!(self.popups.front(), Some(Popup::Report(_) | Popup::YearReport(_) | Popup::Chronicle(_))) && self.scroll_on(ctx.assets);
                 match self.popups.front_mut() {
@@ -7159,6 +7172,7 @@ pub(crate) mod tests {
         g.open(&assets, Menu::Question);
         let Some(Popup::Choice { acts, .. }) = g.popups.back() else { panic!("no dialog") };
         assert_eq!(acts.len(), 6);
+        shot(&g, &assets, "contest_entry");
         g.step(&assets, Field::Mask, 1 << 2);
         g.step(&assets, Field::Mask, 1 << 4);
         g.step(&assets, Field::Mask, 1 << 2);
@@ -7334,10 +7348,16 @@ pub(crate) mod tests {
         let vote = g.election_screen(&assets, (3, 6), 0xC1, &[c, h], &[0xFF, 0xFF], false, &[(e, c)], None, Some((h, 0xFF)));
         g.popups.push_back(Popup::Election(Box::new(vote)));
         g.pending = Some(Pending { cmd: None, answers: vec![], ask: Ask::Vote { elector: h, candidates: vec![c, h], for_: 0xFF, loc: 3, seat: 6, religion: 0, rivals: vec![0xFF, 0xFF], privileged: false, votes: vec![(e, c)] } });
+        assert!(g.live_vote(match g.popups.front() { Some(Popup::Election(el)) => el, _ => unreachable!() }));
         g.update(&mut ctx, &space, 0);
         assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 3), "on the prompt");
         g.update(&mut ctx, &space, 0);
         assert!(matches!(g.popups.front(), Some(Popup::Election(el)) if el.pos == 3), "the prompt stays");
+        // a click on a candidate line during the list votes at once
+        let Some(Popup::Election(el)) = g.popups.front_mut() else { unreachable!() };
+        el.pos = 0;
+        g.update(&mut ctx, &Input { events: vec![Event::Left(200, 150 + 24)], ..Default::default() }, 0);
+        assert!(!matches!(g.pending.as_ref().map(|p| &p.ask), Some(Ask::Vote { .. })), "the vote was answered");
         g.popups.clear();
         g.pending = None;
         // a finished election with the human's answered vote in it goes
