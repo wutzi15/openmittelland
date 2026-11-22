@@ -324,13 +324,37 @@ fn speech_of(src: &[u8]) -> Option<String> {
     (!names.is_empty()).then(|| names.join("+"))
 }
 
-/// A caption box that closes by itself (ours, `$<n>T`): `n` ms after its speech ends, or 2 s + `n` when no speech plays
-/// (the callers' "idle → delay(2000), else until idle", rules-42 §2); clicks do nothing.
-fn hold_of(src: &[u8]) -> Option<u32> {
-    src.iter().enumerate().filter(|&(_, &b)| b == b'$').find_map(|(i, _)| {
+/// A caption box that closes by itself (ours, `$<n>T`): `n` ms after its speech ends, or `idle` + `n` when no speech
+/// plays (the callers' "idle → delay(2000), else until idle", rules-42 §2; `$<k>I` sets another idle wait, the
+/// funeral's 3500), but not before `$<m>U` ms have passed (the mourners' "delay(2000), then until idle", rules-17
+/// §4.3); clicks do nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Hold {
+    after: u32,
+    idle: u32,
+    min: u32,
+}
+
+impl Hold {
+    fn ms(self, speech_ms: u32) -> u32 {
+        (if speech_ms > 0 { speech_ms } else { self.idle }).max(self.min) + self.after
+    }
+}
+
+fn hold_of(src: &[u8]) -> Option<Hold> {
+    let mut h = Hold { after: 0, idle: 2000, min: 0 };
+    let mut timed = false;
+    for (i, _) in src.iter().enumerate().filter(|&(_, &b)| b == b'$') {
         let d = src[i + 1..].iter().take_while(|b| b.is_ascii_digit()).count();
-        (d > 0 && src.get(i + 1 + d) == Some(&b'T')).then(|| std::str::from_utf8(&src[i + 1..i + 1 + d]).ok()?.parse().ok())?
-    })
+        let Some(n) = (d > 0).then(|| std::str::from_utf8(&src[i + 1..i + 1 + d]).ok()?.parse().ok()).flatten() else { continue };
+        match src.get(i + 1 + d) {
+            Some(b'T') => (h.after, timed) = (n, true),
+            Some(b'I') => h.idle = n,
+            Some(b'U') => h.min = n,
+            _ => {}
+        }
+    }
+    timed.then_some(h)
 }
 
 /// Play length of a WAV in ms, from its header.
@@ -1936,7 +1960,10 @@ impl Game {
                         _ => None,
                     });
                     self.popups.push_back(Popup::Will(will));
-                    let boxes = [vec![([0, 0, 640, 60], [speech(223_907), b"$0T".to_vec(), src].concat())], last.unwrap_or_default()].concat();
+                    // rules-17 §4.2 step 3, §4.3: the speech or 3.5 s, then 2 s and the mourners; 4 s and no mourners when
+                    // the only child inherits
+                    let hold = if *kids == 1 { b"$3500I$4000T".as_slice() } else { b"$3500I$2000T" };
+                    let boxes = [vec![([0, 0, 640, 60], [speech(223_907), hold.to_vec(), src].concat())], last.unwrap_or_default()].concat();
                     self.popups.push_back(Popup::Scene { pic: 0xC8, boxes });
                 }
                 // the conquest plays the film (rules-21 §2.3), before the conquest text, 10/100 s per frame (rules-56 §10);
@@ -2876,7 +2903,8 @@ impl Game {
             .filter(|h| h[0] == step)
             .map(|&[_, a, line, v, g]| {
                 let (head, y) = [(&b"$L"[..], 421), (&b"$R"[..], 421), (&b"$C"[..], 451)][a as usize];
-                ([0, y, 640, 60], [voice([u32::from(v), u32::from(g), 2, 3], u32::from(base + line)), b"$0T".to_vec(), head.to_vec(), table[line as usize].clone()].concat())
+                // each heckle: flip, delay(2000), then until the speech ends (rules-17 §4.3 step 4)
+                ([0, y, 640, 60], [voice([u32::from(v), u32::from(g), 2, 3], u32::from(base + line)), b"$2000U$0T".to_vec(), head.to_vec(), table[line as usize].clone()].concat())
             })
             .collect()
     }
@@ -5514,7 +5542,7 @@ impl Screen for Game {
                 self.scene_ms = (0, key);
             }
             self.scene_ms.0 += dt_ms;
-            if hold_of(&boxes[0].1).is_some_and(|n| self.scene_ms.0 >= if self.speech_ms > 0 { self.speech_ms } else { 2000 } + n)
+            if hold_of(&boxes[0].1).is_some_and(|h| self.scene_ms.0 >= h.ms(self.speech_ms))
                 && let Some(Popup::Scene { boxes, .. } | Popup::Court { boxes, .. }) = self.popups.front_mut()
             {
                 boxes.remove(0);
@@ -7592,7 +7620,10 @@ pub(crate) mod tests {
             g.update(&mut ctx, &crate::input::Input::default(), 60_000);
             assert!(matches!(g.popups.front(), Some(Popup::Scene { boxes, .. }) if boxes.len() == 5));
         }
-        assert_eq!((hold_of(b"$12S$4000T$CText"), hold_of(b"$CText")), (Some(4000), None));
+        assert_eq!((hold_of(b"$12S$4000T$CText").map(|h| h.after), hold_of(b"$CText")), (Some(4000), None));
+        // the mourners wait 2 s, then for the speech (rules-17 §4.3); the notary's last words 3.5 s without speech
+        assert_eq!(hold_of(b"$2000U$0T").map(|h| (h.ms(0), h.ms(900), h.ms(2600))), Some((2000, 2000, 2600)));
+        assert_eq!(hold_of(b"$3500I$2000T").map(|h| (h.ms(0), h.ms(900))), Some((5500, 2900)));
         // the testament heckle (step 5) follows the notary's last words, from the second table
         g.popups.clear();
         g.report(&assets, vec![SimEvent::Died { person: h, name: "Anna".into(), female: true, nw: 1, epitaph: 3, heckles: vec![[5, 0, 4, 1, 0]] }, SimEvent::Succession { person: h, kids: 2 }], vec![]);
