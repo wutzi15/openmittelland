@@ -2392,16 +2392,16 @@ impl Game {
                 }
             }
             Ask::Building { city, prices } => {
-                // rules-38 §2.3: "%aEin%s für %d Taler.$|" per building, then "%aNichts!"; answer = the building
-                let mut acts = vec![];
-                let mut src = vec![];
+                // rules-38 §2.3: "%aEin%s für %d Taler.$|" per building, then "%aNichts!"; answer = the building.
+                // rules-71 §7: printed under the city question, whose bullet and city name stay (inert)
+                let mut acts = vec![Action::Inert];
+                let mut src = super::subst(&assets.text_id(2525), b"%m", &t(self.loc(city)));
                 for (k, p) in prices.iter().enumerate() {
                     src.extend(super::subst(&super::subst(&assets.text_id(2526), b"%s", &assets.text_id(2520 + k as u32)), b"%d", &t(&dotted(*p))));
                     acts.push(Action::Answer(k as u32));
                 }
                 src.extend(assets.text_id(2527));
                 acts.push(Action::Answer(5));
-                let _ = city;
                 f.inline(&src, acts);
             }
             Ask::AuctionRefused { person, text, city } => {

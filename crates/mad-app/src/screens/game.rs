@@ -1869,14 +1869,13 @@ impl Game {
                     self.jury_song = *song;
                     // the jury votes on the county castle picture, a seal for every guilty vote (rules-15 §6.1)
                     let county = State::jury_county(self.st.persons[*person as usize].loc()) as u16;
-                    // a juror who has not voted shows the framed Justice figure (ICONB3), a guilty vote the prison door
-                    // (ICONB2), both 32 px at (62 + 44 i, 420) (live A/B 2026-11-22; rules-18 §12 read 0x179 / 0x48, which
-                    // are a wheel and a bottle in ICONS3: RE question), an
-                    // acquittal nothing; first all twelve wheels, then the result
+                    // rules-71 §1: word table 0x87310 = [0x30, 0xA7, 0xB3]: a juror who has not voted shows the framed
+                    // Justice figure (ICONB3), a guilty vote the barred cell (ICON30), both 32 px at (62 + 44 i, 420);
+                    // a not-guilty vote restores the backdrop (nothing drawn); first all twelve, then the result
                     // rules-15 §6.1 step 3: `$15H$C$g…` printed into the full-screen window (y 372), no box
                     let caption = assets.text(0xC12F4);
                     let wheels: Vec<(u16, i32, i32)> = (0..12).map(|i| (0xB3, 62 + 44 * i, 420)).collect();
-                    let result: Vec<(u16, i32, i32)> = (0..*guilty as i32).map(|i| (0xB2, 62 + 44 * i, 420)).collect();
+                    let result: Vec<(u16, i32, i32)> = (0..*guilty as i32).map(|i| (0x30, 62 + 44 * i, 420)).collect();
                     self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: wheels, boxes: vec![(FULL, caption.clone())], anim: None });
                     self.popups.push_back(Popup::Court { pic: 0x193 + county, figures: result, boxes: vec![(FULL, caption)], anim: None });
                     let who = t(&self.pref(*person, 1, 1));
@@ -2659,9 +2658,8 @@ impl Game {
         {
             self.hold(*person as usize, Held::Scene(0));
             let o = match *loc { 0..=9 => *idx as usize, 10..=12 => *idx as usize + 10, _ => *idx as usize + 23 };
-            // the picture's church argument is the person's byte +0x10 (rules-15 §3.1), which holds the controller
-            // nibble too: a dismissed human gets the church variant (live A/B 2026-11-22: 0xC0 for a Baumeister;
-            // computers [UNVERIFIED], by the office kind)
+            // rules-71 §2: the picture's church argument is the whole byte +0x10, controller nibble included: a
+            // dismissed human always gets the church variant, a computer only for a church office
             let church = self.st.persons[*person as usize].human() || mad_sim::career::is_church_office(o);
             let pic = Self::place_picture(*loc, church, self.st.persons[*person as usize].religion());
             // rules-15 §3.2/§3.3: the text (`$8H$C$g…`, `$7H` for two or three dismissers) is printed into the
@@ -2685,10 +2683,10 @@ impl Game {
 
     /// A side's tactics hotkey (rules-44 §2): the menu opens when the activation on screen ends. That question is
     /// either the one the game holds at, or an earlier one: then the fight is computed again up to it.
-    fn battle_hotkey(&mut self, assets: &Assets) {
+    fn battle_hotkey(&mut self, assets: &Assets, part: u8) {
         let Some(Popup::Battle(v)) = self.popups.iter_mut().find(|p| matches!(p, Popup::Battle(v) if v.live)) else { return };
         let Some(Pending { cmd, answers, ask }) = self.pending.take() else { return };
-        match v.rewind() {
+        match v.rewind(part) {
             None => {
                 let Ask::Tactics { person, .. } = &ask else { unreachable!() };
                 let name = self.person_name(*person);
@@ -5671,10 +5669,13 @@ impl Screen for Game {
                     ctx.audio.play_wav(w);
                 }
             }
-            let hotkey = match self.pending.as_ref().map(|q| &q.ask) {
-                Some(Ask::Tactics { person, .. }) => Some(self.st.persons[*person as usize].hotkey()),
-                _ => None,
+            // every human side asked in this battle polls its own hotkey (two humans: rules-71 §5)
+            let hotkeys: Vec<(u8, u8)> = if matches!(self.pending.as_ref().map(|q| &q.ask), Some(Ask::Tactics { .. })) {
+                v.askers().into_iter().filter(|&(_, p)| self.st.persons[p as usize].human()).map(|(part, p)| (part, self.st.persons[p as usize].hotkey())).collect()
+            } else {
+                vec![]
             };
+            let side_of = |c: u8| hotkeys.iter().find(|h| h.1.eq_ignore_ascii_case(&c)).map(|h| h.0);
             for e in &input.events {
                 match *e {
                     // intro captions wait for a click (rules-50 §1.2)
@@ -5695,8 +5696,8 @@ impl Screen for Game {
                             }
                         }
                     }
-                    Event::Key(Key::Char(c)) if v.live && !v.menu_open() && !v.caption_open() && hotkey.is_some_and(|k| k.eq_ignore_ascii_case(&c)) => {
-                        self.battle_hotkey(ctx.assets);
+                    Event::Key(Key::Char(c)) if v.live && !v.menu_open() && !v.caption_open() && side_of(c).is_some() => {
+                        self.battle_hotkey(ctx.assets, side_of(c).unwrap_or(0));
                         return Next::Stay;
                     }
                     Event::Left(..) | Event::Right(..) if v.report_open() => v.next_report(),
@@ -5738,7 +5739,7 @@ impl Screen for Game {
                 return Next::Stay;
             }
             if let Some(Popup::Battle(v)) = self.popups.front()
-                && v.live && !v.menu_open() && !v.overlay_open() && v.done() && hotkey.is_some()
+                && v.live && !v.menu_open() && !v.overlay_open() && v.done() && !hotkeys.is_empty()
             {
                 return self.act(Action::Answer(0), ctx);
             }
@@ -9024,7 +9025,8 @@ pub(crate) mod tests {
                 assert_eq!(matches!(g.popups.front(), Some(Popup::Battle(v)) if v.menu_open()), tactics == 2, "ask {tactics}");
                 if tactics == 1 {
                     // the hotkey while the first activation is on screen: the fight is computed again up to its end
-                    g.battle_hotkey(&assets);
+                    let Ask::Tactics { part, .. } = p.ask else { unreachable!() };
+                    g.battle_hotkey(&assets, part);
                     continue;
                 }
                 if tactics == 2 {

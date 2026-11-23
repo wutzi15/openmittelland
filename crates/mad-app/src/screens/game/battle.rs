@@ -105,8 +105,9 @@ pub(super) struct BattleView {
     rng: u32,
     /// the battle song (group 0x1B drawn by the sim)
     pub song: u8,
-    /// (answer index of a tactic question, frame count once its frames are in): where a hotkey can rewind to
-    marks: Vec<(usize, usize)>,
+    /// (answer index of a tactic question, frame count once its frames are in, side, person asked): where a hotkey
+    /// can rewind to
+    marks: Vec<(usize, usize, u8, u8)>,
     /// intro captions and pre-fight window pages (framed, rules-52) still to click away; the field waits under them
     /// (rules-50 §1.2)
     captions: std::collections::VecDeque<Page>,
@@ -226,14 +227,14 @@ impl BattleView {
                 self.pos = self.frames.len();
                 self.frames.extend(frames.iter().cloned());
             }
-            Ask::Tactics { frames, .. } => {
+            Ask::Tactics { frames, part, person, .. } => {
                 if self.marks.is_empty() {
                     // over the fully deployed field (live capture 2026-11-16)
                     self.overlay = Some(Overlay::Intro);
                     self.pos = self.frames.len();
                 }
                 self.frames.extend(frames.iter().cloned());
-                self.marks.push((at, self.frames.len()));
+                self.marks.push((at, self.frames.len(), *part, *person));
             }
             _ => {}
         }
@@ -245,10 +246,20 @@ impl BattleView {
         self.menu = Some(Menu { part: *part, name, groups: groups.clone(), tactics: groups.iter().map(|g| g.tactic).collect() });
     }
 
-    /// The hotkey was pressed: the question that ends the activation on screen. Frames after it are dropped (the
-    /// fight is computed again from there); `None` when it is the last question so far.
-    pub fn rewind(&mut self) -> Option<usize> {
-        let k = self.marks.iter().position(|&(_, len)| len > self.pos).unwrap_or(self.marks.len().saturating_sub(1));
+    /// The side asked by each tactic question so far, with the person: whose hotkeys this battle polls.
+    pub fn askers(&self) -> Vec<(u8, u8)> {
+        let mut v: Vec<(u8, u8)> = self.marks.iter().map(|m| (m.2, m.3)).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// Side `part`'s hotkey was pressed: its question that ends the activation on screen (rules-44 §2: one queue
+    /// slot per side, rules-71 §5). Frames after it are dropped (the fight is computed again from there); `None`
+    /// when it is the last question so far.
+    pub fn rewind(&mut self, part: u8) -> Option<usize> {
+        let last = self.marks.iter().rposition(|m| m.2 == part)?;
+        let k = self.marks.iter().position(|m| m.2 == part && m.1 > self.pos).unwrap_or(last);
         if k + 1 >= self.marks.len() {
             return None;
         }
@@ -675,5 +686,25 @@ mod tests {
         let rows: Vec<usize> = (0..480).filter(|&y| frame.pixels[y * 640..(y + 1) * 640].iter().any(|&p| p != 0)).collect();
         let tops: Vec<usize> = rows.iter().copied().filter(|&y| !rows.contains(&y.wrapping_sub(1))).collect();
         assert_eq!(tops, [181, 217]);
+    }
+
+    /// rules-71 §5: with two humans each side's hotkey rewinds to its own question of the activation on screen.
+    #[test]
+    fn real_rewind_per_side() {
+        let Some(assets) = super::super::tests::test_assets() else { return };
+        let mut v = super::BattleView::base(&assets, 0, [0; 4], vec![], true, false);
+        // two activations, each asking side 0 (person 160) then side 1 (person 161); frames 10 and 20
+        v.marks = vec![(0, 10, 0, 160), (1, 10, 1, 161), (2, 20, 0, 160), (3, 20, 1, 161)];
+        v.frames = vec![Default::default(); 20];
+        assert_eq!(v.askers(), vec![(0, 160), (1, 161)]);
+        let marks = v.marks.clone();
+        let mut at = |v: &mut super::BattleView, pos: usize, part: u8| {
+            (v.pos, v.marks, v.frames) = (pos, marks.clone(), vec![Default::default(); 20]);
+            v.rewind(part)
+        };
+        assert_eq!(at(&mut v, 5, 1), Some(1), "side 1's question of the first activation");
+        assert_eq!(at(&mut v, 5, 0), Some(0));
+        assert_eq!(at(&mut v, 15, 0), Some(2));
+        assert_eq!(at(&mut v, 15, 1), None, "the last question: the menu opens at once");
     }
 }

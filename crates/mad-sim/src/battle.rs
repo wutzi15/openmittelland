@@ -1108,15 +1108,14 @@ impl Battle {
                     } else if m.frames == 0 && m.state == 4 && m.captured && !m.fallen {
                         // rules-42 §7.3: at the fall's end the captive becomes type 12 of the
                         // captor's side, keeping his old unit index (so path mode 5 counts him as a
-                        // same-side record of another unit); he leaves his unit's men. His
-                        // participant stays (colour is presentation; fight.rs books him as a loss).
+                        // same-side record of another unit). He stays in his unit's slot (rules-71 §4):
+                        // his HP keeps the unit activated, with no moves. His participant stays (colour
+                        // is presentation; the end counts skip type 12, fight.rs books him as a loss).
                         m.typ = 12;
                         m.side ^= 1;
                         m.state = 0;
                         // drawn as a banner: one 6-frame wave, facing 0 (rules-43 §1)
                         (m.facing, m.frame_idx, m.frames) = (0, 0, 6);
-                        let u = m.unit;
-                        self.units[u].men.retain(|&j| j != i);
                     }
                 }
                 E::O(i) => {
@@ -1285,7 +1284,9 @@ impl Battle {
     }
 
     fn activate(&mut self, u: usize, rng: &mut Rng) {
-        if !self.units[u].men.iter().any(|&m| self.living(&self.men[m])) {
+        // the "men left" test sums the slots' HP (rules-71 §4): a converted prisoner keeps his, so a unit of
+        // prisoners is still activated (its tactic is still chosen) and does nothing
+        if !self.units[u].men.iter().any(|&m| self.living(&self.men[m]) || (self.men[m].captured && !self.men[m].fallen && !self.men[m].left)) {
             return;
         }
         // §5.7: a unit is computer-controlled unless its participant is a human whose leader lives
@@ -1294,7 +1295,8 @@ impl Battle {
         }
         for &m in &self.units[u].men.clone() {
             let mm = &mut self.men[m];
-            mm.moves = MOVES[mm.typ as usize];
+            // MOVES ends after type 11; the bytes after it are 0, so a prisoner (type 12) never moves (rules-71 §4)
+            mm.moves = MOVES.get(mm.typ as usize).copied().unwrap_or(0);
             mm.frames = 0;
             mm.target = None;
         }
@@ -1565,7 +1567,10 @@ pub mod tests {
         assert_eq!(b.objs.last().map(|o| (o.typ, o.frames)), Some((19, 17)));
         let p = &b.men[1];
         assert_eq!((p.typ, p.side, p.unit, p.hp > 0), (12, 1, 0, true));
-        assert!(!b.units[0].men.contains(&1));
+        // rules-71 §4: he keeps his unit slot; its next activation gives him no moves
+        assert!(b.units[0].men.contains(&1));
+        b.activate(0, &mut Rng::new(1));
+        assert_eq!(b.men[1].moves, 0);
     }
 
     /// rules-40 §34: lowest score acts first; among equal scores the later-deployed unit first.
