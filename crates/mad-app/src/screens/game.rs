@@ -7906,6 +7906,20 @@ pub(crate) mod tests {
         assert!(front(&g).contains("einziges Lager"), "{}", front(&g));
         // with a second branch: the close item asks 0xBE58C, Ja sells
         let other = (0..10u8).find(|&x| x != c && g.st.rights_holder(x as usize).is_none()).unwrap();
+        // ours (`prefs.warnings`): a purchase leaving less than the orders cost asks first (playtest: the new branch was seized)
+        let cash = g.st.persons[h].cash();
+        let price = g.st.branch_price(other as usize);
+        g.st.persons[h].set_cash_raw(price + 1);
+        assets.prefs.borrow_mut().warnings = true;
+        g.popups.clear();
+        g.open(&assets, Menu::City(other));
+        let Some(Popup::Choice { acts, .. }) = g.popups.front() else { panic!() };
+        assert!(acts.iter().any(|a| matches!(a, Action::YesNo(..))), "{acts:?}");
+        g.act(acts.iter().find(|a| matches!(a, Action::YesNo(..))).unwrap().clone(), &mut ctx);
+        shot(&g, &assets, "buy_branch_warning");
+        assets.prefs.borrow_mut().warnings = false;
+        g.popups.clear();
+        g.st.persons[h].set_cash_raw(cash);
         g.act(Action::Sim(Command::BuyBranch { city: other }, None), &mut ctx);
         g.popups.clear();
         g.open(&assets, Menu::City(c));

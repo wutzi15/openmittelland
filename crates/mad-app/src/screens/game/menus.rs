@@ -210,7 +210,14 @@ impl Game {
                         // rules-23 §7.1: without the cash a box over the info window (0xBE500), no purchase
                         let price = self.st.branch_price(c as usize) as u32;
                         let short = (self.st.persons[h].cash() as u32) < price;
-                        let act = if short { Action::Boxed(assets.text(0xBE500), [140, 160, 360, 160]) } else { Action::Sim(Command::BuyBranch { city: c }, None) };
+                        let mut act = if short { Action::Boxed(assets.text(0xBE500), [140, 160, 360, 160]) } else { Action::Sim(Command::BuyBranch { city: c }, None) };
+                        // ours (`prefs.warnings`): the purchase would leave less cash than the confirmed orders cost
+                        let (left, cost) = (self.st.persons[h].cash() - price as i32, self.st.props_of(h, mad_sim::state::KIND_BRANCH).map(|b| self.order_cost(b)).sum::<i32>());
+                        if !short && assets.prefs.borrow().warnings && left < cost {
+                            let pr = assets.prefs.borrow();
+                            let q = format!("{} {} {} {} {}", pr.tr("Nach dem Kauf bleiben", "After the purchase"), dotted(left), pr.tr("Taler, die bestätigten Aufträge kosten", "Taler remain, the confirmed orders cost"), dotted(cost), pr.tr("Taler. Am Jahresende kann eine Pfändung drohen. Trotzdem kaufen?", "Taler. A seizure may follow at the year's end. Buy anyway?"));
+                            act = Action::YesNo([b"$C".as_slice(), &t(&q), b"$N$N%m  %m"].concat(), [100, 140, 440, 200], Box::new(act));
+                        }
                         f.icon_item(&format!("Lager für {} Taler eröffnen", dotted(price)), act)
                     }
                 };
