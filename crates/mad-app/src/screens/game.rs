@@ -4852,7 +4852,12 @@ impl Game {
                             Pref::Speed => p.speed = p.speed % 4 + 1,
                             Pref::Autosave => p.autosave_years = match p.autosave_years { 0 => 1, 1 => 5, 5 => 10, _ => 0 },
                             Pref::Undo => p.undo ^= true,
-                            Pref::Tooltips => p.tooltips ^= true,
+                            // Aus, Ein (box at the pointer), Zeile (line at the bottom)
+                            Pref::Tooltips => (p.tooltips, p.tip_line) = match (p.tooltips, p.tip_line) {
+                                (false, _) => (true, false),
+                                (true, false) => (true, true),
+                                (true, true) => (false, false),
+                            },
                             Pref::Shortcuts => p.shortcuts ^= true,
                             Pref::Warnings => p.warnings ^= true,
                             Pref::Lang => p.lang = if p.lang == crate::prefs::Lang::De { crate::prefs::Lang::En } else { crate::prefs::Lang::De },
@@ -5979,7 +5984,11 @@ impl Screen for Game {
         if let Some(lines) = self.office_tip(assets, mouse) {
             tips::draw_lines(frame, assets, &lines, (mouse.0 + 14, mouse.1 + 22));
         } else if let Some(tip) = self.tooltip(assets, mouse) {
-            tips::draw_tip(frame, assets, &tip, mouse);
+            if assets.prefs.borrow().tip_line {
+                tips::draw_bar(frame, assets, &tip, mouse);
+            } else {
+                tips::draw_tip(frame, assets, &tip, mouse);
+            }
         }
         // the wheel of wait_click: 16 frames, one per BIOS tick (~55 ms), restarted by every wait (rules-41 §3)
         match (c, self.wait_ms.1) {

@@ -24,6 +24,8 @@ pub struct Prefs {
     /// "Rückgängig": the turn end can be taken back once.
     pub undo: bool,
     pub tooltips: bool,
+    /// Tooltips as one line at the bottom of the screen instead of a box at the pointer.
+    pub tip_line: bool,
     /// Keyboard shortcuts: Kontor keys, Space/Enter end the turn, 1-9 pick a menu line, ? lists them.
     pub shortcuts: bool,
     /// Warnings before debt seizure, loans due and similar.
@@ -70,6 +72,7 @@ impl Default for Prefs {
             history: 10,
             undo: false,
             tooltips: false,
+            tip_line: false,
             shortcuts: false,
             warnings: false,
             lang: Lang::De,
@@ -106,6 +109,7 @@ impl Prefs {
                 "history" => p.history = n.max(1),
                 "undo" => p.undo = b,
                 "tooltips" => p.tooltips = b,
+                "tip_line" => p.tip_line = b,
                 "shortcuts" => p.shortcuts = b,
                 "warnings" => p.warnings = b,
                 "lang" => p.lang = if v == "en" { Lang::En } else { Lang::De },
@@ -132,7 +136,7 @@ impl Prefs {
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let b = |v: bool| if v { 1 } else { 0 };
         let s = format!(
-            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\noffice_info={}\nskip_trial={}\nskip_lot={}\ncontest_names={}\n",
+            "fullscreen={}\ninteger_scale={}\nspeed={}\nautosave_years={}\nhistory={}\nundo={}\ntooltips={}\nshortcuts={}\nwarnings={}\nlang={}\nproduction_help={}\ndebt_mercy={}\nmore_workers={}\nseed_choice={}\nsell_all={}\nledger={}\nprice_table={}\nevent_log={}\norder_copy={}\nconfirmations={}\noffice_info={}\nskip_trial={}\nskip_lot={}\ncontest_names={}\ntip_line={}\n",
             b(self.fullscreen),
             b(self.integer_scale),
             self.speed,
@@ -157,6 +161,7 @@ impl Prefs {
             b(self.skip_trial),
             b(self.skip_lot),
             b(self.contest_names),
+            b(self.tip_line),
         );
         std::fs::create_dir_all(dir)?;
         std::fs::write(dir.join("prefs.txt"), s)
@@ -180,7 +185,7 @@ mod tests {
     #[test]
     fn round_trip() {
         let dir = std::env::temp_dir().join(format!("mad-prefs-{}", std::process::id()));
-        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, office_info: true, skip_trial: true, skip_lot: true, contest_names: true, ..Prefs::default() };
+        let p = Prefs { speed: 3, autosave_years: 5, lang: Lang::En, shortcuts: true, debt_mercy: true, seed_choice: true, ledger: true, event_log: true, confirmations: true, office_info: true, skip_trial: true, skip_lot: true, contest_names: true, tip_line: true, ..Prefs::default() };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);
         std::fs::remove_dir_all(&dir).ok();

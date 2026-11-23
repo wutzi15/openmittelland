@@ -62,7 +62,7 @@ fn pref_tip(k: Pref) -> (&'static str, &'static str) {
         Pref::IntegerScale => ("Ganzzahlig skalieren\nScharfe Pixel, dafür schwarze Ränder.\nAus: füllt das Fenster im Format 4:3.", "Integer scaling\nSharp pixels, black borders.\nOff: fills the window at 4:3."),
         Pref::Speed => ("Tempo 1x bis 4x\nSchnellere Texte, Wartezeiten, Filme\nund Schlachten. Die Musik bleibt gleich.", "Speed 1x to 4x\nFaster texts, waits, films and battles.\nThe music stays the same."),
         Pref::Lang => ("Sprache\nNur für die Texte der Extras.\nDas Spiel selbst bleibt deutsch.", "Language\nFor the Extras' own texts only.\nThe game itself stays German."),
-        Pref::Tooltips => ("Hinweise\nZeigt nach kurzem Verweilen,\nwas ein Klick bewirkt.", "Tooltips\nAfter a short rest the pointer\nshows what a click does."),
+        Pref::Tooltips => ("Hinweise\nZeigt nach kurzem Verweilen, was ein Klick\nbewirkt: Ein als Kasten, Zeile am Bildrand.", "Tooltips\nAfter a short rest, what a click does:\nOn as a box, Line at the screen bottom."),
         Pref::Shortcuts => ("Tasten\nKontor-Tasten zu allen Räumen, Leertaste\nbeendet die Runde. ? zeigt alle Tasten.", "Shortcuts\nKontor keys to every room, Space ends\nthe turn. ? lists all keys."),
         Pref::Autosave => ("Autosave\nSpeichert alle 1, 5 oder 10 Jahre in den\nVerlauf (Spiel laden, Verlauf...).", "Autosave\nSaves every 1, 5 or 10 years into the\nhistory (Load game, History...)."),
         Pref::Undo => ("Rückgängig\nTaste U nimmt die letzte Runde einmal\nzurück. Danach wird neu gewürfelt.", "Undo\nKey U takes the last turn back once.\nThe dice are rolled anew."),
@@ -402,6 +402,23 @@ pub(super) fn draw_tip(frame: &mut Frame, assets: &Assets, tip: &str, mouse: (i3
     draw_lines(frame, assets, &lines, (mouse.0 + 14, mouse.1 + 22));
 }
 
+/// Ours (`prefs.tip_line`): the tooltip as a parchment strip along the bottom edge, or the top edge while the
+/// pointer is in the lower half (so it never covers what is pointed at); a title line runs on with ": ".
+pub(super) fn draw_bar(frame: &mut Frame, assets: &Assets, tip: &str, mouse: (i32, i32)) {
+    let text = match tip.split_once('\n') {
+        Some((head, rest)) => format!("{head}: {}", rest.replace('\n', " ")),
+        None => tip.to_string(),
+    };
+    let laid = text::layout(&assets.font, &[b"$t$L".as_slice(), &super::t(&text)].concat(), &[], &[], 640 - 2 * TIP_PAD.0 + 2 * text::INSET, &[]);
+    let h = laid.height - text::INSET + 2 * TIP_PAD.1 + 4;
+    let top = mouse.1 >= 240;
+    let y = if top { 0 } else { 480 - h };
+    frame.fill_rgb([0, y, 640, h], [52, 30, 10]);
+    frame.fill_rgb([0, y + (!top) as i32, 640, h - 1], [232, 210, 160]);
+    frame.fill_rgb([0, if top { y + h - 4 } else { y + 3 }, 640, 1], [176, 132, 52]);
+    text::draw(frame, &assets.font, &laid, TIP_PAD.0 - text::INSET, y + TIP_PAD.1 + 3 - text::INSET);
+}
+
 /// Line pitch of the box: tighter than the game's 24 px rows.
 const TIP_LINE_H: i32 = 20;
 /// Inner margin left/right and top/bottom.
@@ -496,6 +513,9 @@ mod tests {
         let at = (r.x + 2, r.y + 2);
         rest(&mut g, &mut ctx, at, TIP_MS);
         shot_at(&g, &assets, "tip_menu_long", at);
+        assets.prefs.borrow_mut().tip_line = true;
+        shot_at(&g, &assets, "tip_menu_line", at);
+        assets.prefs.borrow_mut().tip_line = false;
         g.popups.clear();
         // the branch screen: warehouse, a good, a bottom icon
         let h = g.me().unwrap();

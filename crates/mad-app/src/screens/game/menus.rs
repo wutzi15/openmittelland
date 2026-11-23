@@ -493,7 +493,7 @@ impl Game {
                         (tr("Ganzzahlig skalieren:", "Integer scaling:"), on(p.integer_scale), IntegerScale),
                         (tr("Tempo:", "Speed:"), format!("{}x", p.speed), Speed),
                         (tr("Sprache:", "Language:"), tr("Deutsch", "English"), Lang),
-                        (tr("Hinweise:", "Tooltips:"), on(p.tooltips), Tooltips),
+                        (tr("Hinweise:", "Tooltips:"), if p.tooltips && p.tip_line { tr("Zeile", "Line") } else { on(p.tooltips) }, Tooltips),
                         (tr("Tasten (?):", "Shortcuts (?):"), on(p.shortcuts), Shortcuts),
                         (tr("Autosave alle:", "Autosave every:"), if p.autosave_years == 0 { on(false) } else { format!("{} {}", p.autosave_years, tr("J.", "y.")) }, Autosave),
                         (tr("Rückgängig:", "Undo:"), on(p.undo), Undo),
