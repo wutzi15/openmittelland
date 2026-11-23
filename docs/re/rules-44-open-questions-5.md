@@ -82,7 +82,7 @@ This opens the queued menus in the order the keys were pressed. Afterwards `0xDC
 
 **RNG.** The poll, the key compare and `0x37100` call no `rand`. The menu itself draws nothing. The only RNG effect is indirect: the chosen tactic changes later game-rule draws.
 
-Answer: the original polls the keyboard once per animation frame of the current unit's activation, after the frame's draw and tick wait, in display and ESC mode alike. Hotkeys are queued, at most one per side, in press order. The menu opens when the current unit's activation ends, not at a round boundary, and never automatically before round 0 (only the "Taktik-Menü: Hot-Key" caption is shown). The new tactic is written at once and is used from each unit's next activation, which can be later in the same round. No RNG draws are involved. Correction: `formats.md` §11.5 "set-up phase before each battle round" is wrong; the menu is hotkey-only.
+Answer: the original polls the keyboard once per animation frame of the current unit's activation, after the frame's draw and tick wait, in display and ESC mode alike. Hotkeys are queued, at most one per side, in press order (one key per frame; if both humans share a key, one press queues both sides, attacker first; rules-71 §5). The menu opens when the current unit's activation ends, not at a round boundary, and never automatically before round 0 (only the "Taktik-Menü: Hot-Key" caption is shown). The new tactic is written at once and is used from each unit's next activation, which can be later in the same round. No RNG draws are involved. Correction: `formats.md` §11.5 "set-up phase before each battle round" is wrong; the menu is hotkey-only.
 
 ## 3. Election presentation
 

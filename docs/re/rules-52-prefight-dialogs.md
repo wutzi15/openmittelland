@@ -18,7 +18,7 @@ Source: `battle_main` `0x3EE60`, listing `0x3FB77..0x40AD2`. Helpers: `print` `0
 with (D, A, style `0x25`, &offer).
 
 - Items: 0 = "… Taler." line, 1 = the 5-digit u32 spinner (0..99999, preset 0, `rules-13` §1.3), 2 = "Niemals, ich gewinne!".
-- The `menu` loop repeats while the result is item 1. On item 1 the menu's out-value `[EBP−0x90]` is also added to `offer` [UNVERIFIED: meaning of that out-value].
+- The `menu` loop repeats while the result is item 1. On item 1 the menu's out-value `[EBP−0x90]` is added to `offer`: it is the clamped digit step `±10^k` of the click; `menu` never writes the spinner's variable itself (rules-71 §6, [C]).
 - Result 0 keeps `offer`. Any other result (item 2 or a right click) sets `offer := 0`.
 - No cap against D's cash is applied here.
 

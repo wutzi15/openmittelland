@@ -103,8 +103,8 @@ Sounds only when the battle is displayed (`0xDC83F == 0`, `rules-07` §5.13); th
   - state 3 (walk), frame 5 or 2, and `rand(100) < 60`: `0x59 + rand(6)`.
   - state 1 (strike/shoot), frame 3: type 1 or 6 (shooters): `0x46 + rand(3)`; type 10 or 11 (carters, sailors): `0x31 + rand(2)`; any other type: `0x5F + rand(5)`.
   - state 2 (parry), frame 3: type in {1, 6, 10, 11, 2, 7}: `0x31 + rand(2)`; others: `0x5F + rand(5)`.
-  - state 5 (falling), frame 5: `0x58`.
-  - hit flag (+0x20) set: flag cleared, frame −1, remaining frames +1, redraw, `0x39 + rand(9)`.
+  - state 5 (falling), frame 5: `0x58 + rand(1)` (the `rand(1)` is a draw; corrected by rules-71 §3).
+  - hit flag (+0x20) set: flag cleared, frame −1, remaining frames +1, icon 0xF8 drawn at the man, `0x39 + rand(9)`. This runs in the object scan of the same frame in which the strike resolution set the flag (rules-71 §3).
   - state 6 (laying a bomb), frame 6: bomb object created, `0x58`.
 - Explosion (bomb fuse end or cannon ball arrival): `0x33 + rand(6)`; then `rand(100)` (always drawn) and if < 90: `0x33 + rand(6)` again.
 - Object step 0x3CFDB after the object sprite is drawn: `0x43 + rand(2)`. Which object kinds reach this step is [UNVERIFIED] (cannon ball in flight is the likely one).

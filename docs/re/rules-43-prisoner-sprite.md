@@ -22,7 +22,7 @@ The record stays in the men layer at the man's cell.
 
 **Animation.** The scan draws first and then, if the counter is > 0, increments the frame index and decrements the counter (`0x3C1D6..0x3C214`). With counter 6 the prisoner plays frames 1444..1449 once, one per scan frame. When the counter reaches 0, the end-of-animation switch (`0x3C43C`, jump table `0x3C410`, state 0 → `0x3C46E`) sets the frame index to **5** for type 12 (0 for other types). The counter stays 0, so the record then shows frame 1449 for the rest of the battle. A displayed frame waits one BIOS tick (~55 ms, `rules-07` §5.11), so the wave lasts about 6 ticks.
 
-**Banner vs prisoner.** Both are type 12, state 0, facing 0, and both are in the men layer. The only field that tells them apart is **+0x1E**:
+**Banner vs prisoner.** Both are type 12, state 0, facing 0, and both are in the men layer. The only field that tells them apart is **+0x1E** (and only until the prisoner's old unit is next activated: its reset loop writes +0x1E := 0xFF into every slot, rules-71 §4):
 - **banner:** 0xFF, because `0x3D7C0` writes +0x1E := 0xFF on every create (`0x3DBAA`);
 - **prisoner:** its old type, 0..11.
 

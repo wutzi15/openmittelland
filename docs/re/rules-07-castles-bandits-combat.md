@@ -304,8 +304,8 @@ Path search `path(mode, man)` (0x37C00) returns [L for the exact encoding, consi
 **Walk step** (used below): state 3, facing = step direction, the destination cell is reserved (grid byte 0xFE) and entered when the animation ends, moves -= 1. **Go idle**: state 0, moves := 0 (the man is done for this round). **Strike t**: state 1, facing toward t, target := t; if t is not a cannoneer (types 2, 7), t is put into state 2 (parry) facing back at the attacker (`(dir + 4) mod 8`), which also uses up t's time until that animation ends.
 
 When the animation of a man with moves left ends:
-1. If his target is another man t: target cleared, man goes idle, and if t has not fallen and is a fighter (type < 12):
-   - unit tactic 7: capture if `rand(5 * condition_t + 1) < condition_man`: t falls (state 4) and counts as a prisoner of the man's participant (`0xDB804`); otherwise t returns to idle.
+1. If his target is another man t: target cleared, man goes idle, and if t has not fallen (state 4) and is a fighter (type < 12) — otherwise nothing is rolled at all (rules-71 §4):
+   - unit tactic 7: capture if `rand(5 * condition_t + 1) < condition_man`: t falls (state 4, frame 0, fall frame count, +0x1E := the captor's man index; participant, side, HP, type and unit slot unchanged until the fall ends, `rules-43` §1) and counts as a prisoner of the man's participant (`0xDB804`); otherwise t returns to idle. (Detailed by rules-71 §4.)
    - otherwise: `hit = rand(100) < condition_man` (the roll is always made), `damage = hit * rand(HP_man + 1)` (also always rolled); damage > 0 marks t as hit and resets the battle's idle counter to 10. If damage < HP_t: `HP_t -= damage` and t is set back to idle (a hit interrupts t's parry/action); else HP_t = 0 and t falls.
    - The man's moves are then 0: a strike ends his round.
 2. If his target is himself (a bomb layer after laying): `r = path(4, man)` (away from enemies); r = 0xFF or 0: go idle, else walk step; when moves reach 0 the target is cleared.

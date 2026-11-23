@@ -106,7 +106,7 @@ All three boxes have `flag = 0`, so each waits for a click (this settles the [L]
 | 13 (principality) | **0xBF** (B/ICONBF: church interior, a niche with a cross) | **0xBE** (B/ICONBE: church interior, altar with candles) |
 
 Religion 0/1 is the person's byte +0x03 (0 = Evangelisch, 1 = Katholisch in the order of the new-game menu, `formats.md` §8.2 [L for which is which]). Callers:
-- dismissal of p: `(office location of p (+0x0F), church nibble of p (+0x10), religion of p (+0x03))`;
+- dismissal of p: `(office location of p (+0x0F), the whole byte +0x10 of p, religion of p (+0x03))` — the controller nibble is included, so a human is always shown the church variant (rules-71 §2);
 - election header: `(place L, office-is-church flag, rand(2))` — for a county church office the picture is **random** between 0xC2 and 0xC3;
 - the two "no election" messages (`rules-12` §3.7 step 6): `(L, office-is-church flag, religion of the winner)`.
 
@@ -182,7 +182,7 @@ Condition `rules-04` §(spies) [L]: notification when `popcount(evidence) > 2`, 
 1. Report window closed, items cleared; picture **0x193 + 0x868D4[office location of p]** = the county castle picture ICONPD/PE/PF of the county the player's office belongs to (table `0x868D4`: cities 0..3 → 10, 4..6 → 11, 7..9 → 12, 10/11/12 → themselves, 13.. → 10); flip.
 2. `win_open(10, 280, 620, 200, 0x8910)`; `0xC121C` `[EXE text]` with (p, county, spinner style 0x14, &bribe): a bullet line with a 4-digit spinner. Clicking the spinner adds the step; clicking the bullet ends the input. Window closed; the bribe is paid.
 3. `[EXE text]` (0xC12F4) printed into the full-screen turn-end window (y = 372) over the castle picture; flip. The strip (0, 420, 640, 32) is backed up. Speech files for "guilty"/"not guilty" are preloaded: slots 0x50 and 0x51 in four voice variants each (digits 1/2 × 0/1) [L].
-4. Twelve juror markers at (62 + 44·i, 420), i = 0..11, redrawn after every vote: not yet voted → icon **0x179** (ICONN9, 32×32, a round seal/wheel glyph [content L]); guilty → icon **0x48** (ICON48, 48×48 framed icon [content: a bottle; L]); not guilty → the backed-up strip is copied back for that 32×32 cell (nothing). Per vote: `rand(12)` start juror, next unvoted juror, `delay` [L: the two delay calls are 1000 and 200 ms], the vote speech sample plays; flip.
+4. Twelve juror markers at (62 + 44·i, 420), i = 0..11, redrawn after every vote: not yet voted → icon **0xB3** (ICONB3, 32×32, the framed Justice figure); guilty → icon **0x30** (ICON30, 32×32, the framed barred cell) (corrected by rules-71 §1: word table `0x87310` = [0x30, 0xA7, 0xB3]); not guilty → the backed-up strip is copied back for that 32×32 cell (nothing). Per vote: `rand(12)` start juror, next unvoted juror, `delay` [L: the two delay calls are 1000 and 200 ms], the vote speech sample plays; flip.
 5. After the 12th vote `delay`, wait for a key/click, speech stopped.
 6. Fewer than 7 guilty: picture **0xB8** (ICONB8: night landscape with a moon, also the year-end backdrop); speech 0x3B6; `sound(0x1E)`; screen transition `0x2C460(0)` [L: a per-scanline effect]; flip; caption box `(10, 220, 620, 100, 0)` `[EXE text]` (0xC1470) with (p). Click.
 7. 7 or more: picture **0xB9** (B/ICONB9: a round tower at night, the Schuldturm); `sound(0x0B)`; ambient samples 0x54..0x57 and 0x85, 0x86 started; transition `0x2C460(0)`; text `[EXE text]` (0xC1320; with fewer than 2 branches 0xC13A8 and speech 0x3B5) on line 1 of the full-screen window; flip; wait loop: every 3 ticks `rand(100) < 2` → `sample_play(0x54 + rand(4))`, `rand(100) == 0` → `sample_play(0x85 + rand(2))` (the parity hazard of `rules-02` §10.3) until a key or click; samples stopped; type-20 record, flag 0x10.
@@ -256,7 +256,7 @@ The siege texts (`0x9F08A` ff., `0xA3916` ff.) are printed into the report windo
 | id | file | content |
 |---|---|---|
 | 0x22 | ICON22 | parchment banner strip 640×72 |
-| 0x48 | ICON48 | 48×48 framed trade-good icon (a bottle) — used as the "guilty" juror marker |
+| 0x30 | ICON30 | 32×32 framed barred cell with a figure — the "guilty" juror marker (corrected by rules-71 §1; 0x48 was a misread) |
 | 0x86 | B/ICON86 | stone wall with windows (fire / avalanche backdrop) |
 | 0xA3 | B/ICONA3 | forest at dusk (robber camp) |
 | 0xB7 | ICONB7 | wooden desk with quill (turn-end report) |
@@ -286,7 +286,7 @@ The siege texts (`0x9F08A` ff., `0xA3916` ff.) are printed into the report windo
 | 0x15A..0x15F | B/ICONLA..LF | transporter pictures 144×144 (LA = covered wagon) |
 | 0x160..0x169 | B/ICONM0..M9 | residences by level 160×120 (M0 = hut) |
 | 0x16A..0x16C | B/ICONMA..MC | the three toll castles 160×120 |
-| 0x179 | ICONN9 | 32×32 round seal/wheel glyph (juror not yet voted) |
+| 0xB3 | ICONB3 | 32×32 framed Justice figure (juror not yet voted; corrected by rules-71 §1, was 0x179) |
 | 0x186..0x18D | B/ICONO6..OD | 64×64 portraits (matchmaker candidates) |
 | 0x18E..0x195 | B/ICONOE..P5 | 64×64 talking-head banks, 23 frames (trial witnesses) |
 | 0x19C | ICONPC | 14-frame spinning coin 16×12 (election votes) |
