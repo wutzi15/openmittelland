@@ -698,7 +698,7 @@ mod tests {
         v.frames = vec![Default::default(); 20];
         assert_eq!(v.askers(), vec![(0, 160), (1, 161)]);
         let marks = v.marks.clone();
-        let mut at = |v: &mut super::BattleView, pos: usize, part: u8| {
+        let at = |v: &mut super::BattleView, pos: usize, part: u8| {
             (v.pos, v.marks, v.frames) = (pos, marks.clone(), vec![Default::default(); 20]);
             v.rewind(part)
         };
